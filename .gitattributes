@@ -1,0 +1,8 @@
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+
+# Data
+*.csv text
+*.mat binary
