@@ -188,10 +188,10 @@ def plot_confusion_matrix(true_labels, predictions, num_classes=3, save_path=Non
     plt.show()
     plt.close()
 
-def plot_tsne(features, labels, num_classes=3, save_path=None, use_pca=True, n_pca_components=50):
+def plot_tsne(features, labels, num_classes=3, save_path=None, use_pca=True, n_pca_components=50, class_names=None):
     """
-    Plot t-SNE visualization using tsnecuda (GPU-accelerated t-SNE).
-    Designed for 3-class classification with distinct colors.
+    Plot t-SNE visualization using tsnecuda (GPU-accelerated t-SNE) with publication-quality aesthetics.
+    Suitable for ScienceDirect or IEEE papers.
     
     Args:
         features: Feature vectors
@@ -200,8 +200,17 @@ def plot_tsne(features, labels, num_classes=3, save_path=None, use_pca=True, n_p
         save_path: Path to save the plot
         use_pca: Whether to use PCA before t-SNE (recommended for high-dim data)
         n_pca_components: Number of PCA components (default: 50)
+        class_names: List of class names. If None, defaults to ['Corona', 'No PD', 'Surface']
     """
     print('Computing t-SNE...')
+    
+    # Set publication-quality style
+    plt.rcParams['font.family'] = 'Times New Roman'
+    plt.rcParams['font.size'] = 12
+    plt.rcParams['axes.linewidth'] = 1.5
+    
+    if class_names is None:
+        class_names = ['Corona', 'No PD', 'Surface']
     
     from sklearn.preprocessing import StandardScaler
     scaler = StandardScaler()
@@ -215,11 +224,27 @@ def plot_tsne(features, labels, num_classes=3, save_path=None, use_pca=True, n_p
         print(f'PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}')
     
     n_samples = features_normalized.shape[0]
-    perplexity = min(5, max(1, (n_samples - 1) // 30))
+    # Standard perplexity calculation: usually between 5 and 50. 
+    # A good heuristic is sqrt(N) or N/10, but capped to avoid errors with small datasets.
+    perplexity = min(50, max(5, n_samples // 10))
     print(f'Number of samples: {n_samples}, perplexity: {perplexity}')
     
-    tsne = TSNE(n_components=2, perplexity=perplexity, learning_rate=200, n_iter=1000, verbose=1)
-    features_tsne = tsne.fit_transform(features_normalized)
+    try:
+        from tsnecuda import TSNE
+        print("Using tsnecuda for GPU acceleration.")
+        tsne = TSNE(n_components=2, perplexity=perplexity, learning_rate=200, n_iter=1000, verbose=1)
+        features_tsne = tsne.fit_transform(features_normalized)
+    except ImportError:
+        print("Warning: tsnecuda not found. Falling back to sklearn.manifold.TSNE (CPU).")
+        from sklearn.manifold import TSNE
+        tsne = TSNE(n_components=2, perplexity=perplexity, learning_rate=200, n_iter=1000, verbose=1, random_state=42)
+        features_tsne = tsne.fit_transform(features_normalized)
+    except Exception as e:
+        print(f"Error with tsnecuda: {e}. Falling back to sklearn.")
+        from sklearn.manifold import TSNE
+        tsne = TSNE(n_components=2, perplexity=perplexity, learning_rate=200, n_iter=1000, verbose=1, random_state=42)
+        features_tsne = tsne.fit_transform(features_normalized)
+
     
     if np.any(np.isnan(features_tsne)) or np.any(np.isinf(features_tsne)):
         print('Warning: t-SNE produced NaN or Inf values. Using PCA 2D instead.')
@@ -228,51 +253,49 @@ def plot_tsne(features, labels, num_classes=3, save_path=None, use_pca=True, n_p
         features_tsne = pca.fit_transform(features_normalized)
         print(f'PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}')
     
-    fig, ax = plt.subplots(figsize=(8, 8))
+    # Create figure with specific dimensions for papers (e.g., 3.5 inches for single column, 7 for double)
+    # Using a square aspect ratio often looks best for t-SNE
+    fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_facecolor('white')
     fig.patch.set_facecolor('white')
     
-    colors = ['#2E8B57', '#FF8C00', '#DC143C']
-    class_names = ['Corona', 'No PD', 'Surface']
+    # Distinct colors and markers for black & white printing compatibility
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b'] # Matplotlib default cycle
+    markers = ['o', 's', '^', 'D', 'v', '<']
     
-    for label in range(num_classes):
-        mask = labels == label
-        ax.scatter(features_tsne[mask, 0], features_tsne[mask, 1], 
-                  c=colors[int(label)], 
-                  label=class_names[int(label)] if label < len(class_names) else f'Class {int(label)}', 
-                  s=80, alpha=0.7, edgecolors='none')
-    
-    ax.set_xlabel('')
-    ax.set_ylabel('')
-    ax.set_title('')
-    
-    ax.grid(True, alpha=0.2, linestyle='--', linewidth=0.5, color='gray')
+    # Ensure we have enough colors/markers
+    if num_classes > len(colors):
+        colors = sns.color_palette("husl", num_classes)
     
     for label in range(num_classes):
         mask = labels == label
         if np.sum(mask) > 0:
-            centroid_x = np.mean(features_tsne[mask, 0])
-            centroid_y = np.mean(features_tsne[mask, 1])
-            ax.text(centroid_x, centroid_y, str(label), 
-                   fontsize=24, fontweight='bold', color='white',
-                   ha='center', va='center',
-                   bbox=dict(boxstyle='circle,pad=0.3', facecolor='none', edgecolor='none'))
+            ax.scatter(features_tsne[mask, 0], features_tsne[mask, 1], 
+                      c=colors[int(label) % len(colors)], 
+                      marker=markers[int(label) % len(markers)],
+                      label=class_names[int(label)] if int(label) < len(class_names) else f'Class {int(label)}', 
+                      s=60, alpha=0.8, edgecolors='k', linewidth=0.5)
     
-    margin = 5
-    x_min, x_max = np.nanmin(features_tsne[:, 0]), np.nanmax(features_tsne[:, 0])
-    y_min, y_max = np.nanmin(features_tsne[:, 1]), np.nanmax(features_tsne[:, 1])
+    # Remove axis ticks and labels for cleaner look
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlabel('t-SNE Dimension 1', fontsize=14, fontweight='bold')
+    ax.set_ylabel('t-SNE Dimension 2', fontsize=14, fontweight='bold')
     
-    if np.isfinite(x_min) and np.isfinite(x_max):
-        ax.set_xlim(x_min - margin, x_max + margin)
-    if np.isfinite(y_min) and np.isfinite(y_max):
-        ax.set_ylim(y_min - margin, y_max + margin)
-    
-    ax.tick_params(labelsize=10, colors='gray')
+    # Remove top and right spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(1.5)
+    ax.spines['bottom'].set_linewidth(1.5)
+
+    # Add legend with frame
+    legend = ax.legend(loc='best', frameon=True, fontsize=12, framealpha=0.9, edgecolor='black')
+    legend.get_frame().set_linewidth(1.0)
     
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.savefig(save_path, dpi=600, bbox_inches='tight', facecolor='white') # High DPI for print
         print(f't-SNE plot saved to: {save_path}')
     plt.show()
     plt.close()
