@@ -1,38 +1,67 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from net.encoder import Conv64F_Encoder
+from net.utils import init_weights
 
 class CosineNet(nn.Module):
-    def __init__(self):
+    def __init__(self, init_type='normal', use_gpu=True):
         super(CosineNet, self).__init__()
-        # Placeholder - Replace with actual pam_mamba architecture
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.AdaptiveAvgPool2d((1, 1))
-        )
-        self.fc = nn.Linear(128, 64)
-    
+        self.encoder = Conv64F_Encoder()
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(64, 64) 
+        
+        init_weights(self, init_type=init_type)
+        if use_gpu and torch.cuda.is_available():
+            self.cuda()
+
     def forward(self, query, support):
-        # query: (way, C, H, W)
-        # support: (way, shot, C, H, W)
-        q_feat = self.encoder(query)  # (way, 128, 1, 1)
-        q_feat = q_feat.view(q_feat.size(0), -1)  # (way, 128)
-        q_feat = self.fc(q_feat)  # (way, 64)
+        """
+        Args:
+            query: (B, NQ, C, H, W)
+            support: (B, Way, Shot, C, H, W)
+        Returns:
+            scores: (B * NQ, Way) - Cosine similarity
+        """
+        B, NQ, C, H, W = query.size()
+        B_s, Way, Shot, C_s, H_s, W_s = support.size()
         
-        support_feats = []
-        for i, s in enumerate(support):
-            # s shape: (shot, C, H, W)
-            s_feat = self.encoder(s)  # (shot, 128, 1, 1)
-            s_feat = s_feat.view(s_feat.size(0), -1)  # (shot, 128)
-            s_feat = self.fc(s_feat)  # (shot, 64)
-            support_feats.append(s_feat.mean(0, keepdim=True))  # (1, 64)
+        # Flatten
+        query_flat = query.view(-1, C, H, W)
+        support_flat = support.view(-1, C, H, W)
         
-        support_feats = torch.cat(support_feats, dim=0)  # (way, 64)
+        # Encode
+        q_feat = self.encoder(query_flat)
+        s_feat = self.encoder(support_flat)
         
-        # Compute similarity scores
-        scores = torch.nn.functional.cosine_similarity(q_feat, support_feats)
+        # Pool and Flatten
+        q_feat = self.avg_pool(q_feat).view(q_feat.size(0), -1)
+        s_feat = self.avg_pool(s_feat).view(s_feat.size(0), -1)
+        
+        # Apply FC layer (Embedding)
+        q_feat = self.fc(q_feat)
+        s_feat = self.fc(s_feat)
+        
+        # Reshape support
+        s_feat = s_feat.view(B, Way, Shot, -1)
+        
+        # Prototypes (Mean of support features)
+        prototypes = s_feat.mean(dim=2) # (B, Way, Feature_Dim)
+        
+        # Reshape query
+        q_feat = q_feat.view(B, NQ, -1)
+        
+        # Compute Cosine Similarity
+        # q: (B, NQ, D), p: (B, Way, D)
+        # Normalize
+        q_norm = F.normalize(q_feat, p=2, dim=2)
+        p_norm = F.normalize(prototypes, p=2, dim=2)
+        
+        # Dot product
+        # (B, NQ, D) @ (B, D, Way) -> (B, NQ, Way)
+        scores = torch.bmm(q_norm, p_norm.transpose(1, 2))
+        
+        # Flatten to (B*NQ, Way)
+        scores = scores.view(-1, Way)
+        
         return scores

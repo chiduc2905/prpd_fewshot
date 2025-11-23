@@ -1,17 +1,19 @@
-# PD Scalogram Fewshot Learning
+# PD Scalogram Few-Shot Learning Project
 
-Few-shot learning on Partial Discharge (PD) Scalogram images with 3 classes: Corona, No PD, and Surface.
+This project implements few-shot learning algorithms (CovaMNet, ProtoNet, CosineNet) for Partial Discharge (PD) classification using scalogram images.
 
-## Dataset Structure
+## Structure
 
-```
-scalogram_images/
-├── corona/              # Corona PD class
-├── no_pd/              # No PD class
-└── surface/            # Surface PD class
-```
-
-Images are automatically split into 80% training and 20% test sets. Files containing 'labeled' in the name are excluded.
+- `main.py`: Unified entry point for training and testing all models.
+- `dataset.py`: Data loading logic for the raw image dataset.
+- `dataloader/`: Contains the `FewshotDataset` class for episodic data generation.
+- `net/`: Contains model definitions and reusable components.
+  - `covamnet.py`: Covariance Metric Network.
+  - `protonet.py`: Prototypical Network.
+  - `cosine.py`: Cosine Similarity Network.
+  - `encoder.py`: Shared convolutional backbone.
+- `function/`: Utility functions (metrics, losses).
+- `checkpoints/`: Directory where model weights are saved.
 
 ## Installation
 
@@ -19,53 +21,48 @@ Images are automatically split into 80% training and 20% test sets. Files contai
 pip install -r requirements.txt
 ```
 
-## Training
+## Usage
 
-### 1-shot Learning
+The `main.py` script handles both training and testing. You can specify the model architecture, shot number, and other hyperparameters via command line arguments.
+
+### Training
+
+**Train CovaMNet (1-shot):**
 ```bash
-python train_1shot.py --dataset_path ../ML/scalogram_images/ --num_epochs 100
+python main.py --model covamnet --shot_num 1 --mode train
 ```
 
-### 5-shot Learning
+**Train ProtoNet (5-shot):**
 ```bash
-python train_5shot.py --dataset_path ../ML/scalogram_images/ --num_epochs 100
+python main.py --model protonet --shot_num 5 --mode train
 ```
 
-## Testing
-
-### 1-shot Testing
+**Train CosineNet (1-shot):**
 ```bash
-python test_1shot.py --dataset_path ../ML/scalogram_images/ --model_path checkpoints/best_model.pth
+python main.py --model cosine --shot_num 1 --mode train
 ```
 
-### 5-shot Testing
+### Testing
+
+To test a trained model, specify the `mode` as `test`. It will automatically look for the best checkpoint in `checkpoints/` unless `--weights` is specified.
+
 ```bash
-python test_5shot.py --dataset_path ../ML/scalogram_images/ --model_path checkpoints/best_model.pth
+python main.py --model covamnet --shot_num 1 --mode test
 ```
 
-## Configuration
+**Specify custom weights:**
+```bash
+python main.py --model covamnet --shot_num 1 --mode test --weights checkpoints/my_model.pth
+```
 
-All parameters can be set via command-line arguments:
+### Common Arguments
 
-- `--dataset_path`: Path to scalogram dataset
-- `--model_name`: Model name prefix
-- `--num_epochs`: Number of training epochs
-- `--way_num`: Number of classes (default: 3)
-- `--shot_num`: Number of samples per class
-- `--lr`: Learning rate (default: 1e-3)
-- `--device`: cuda or cpu
-- `--batch_size`: Batch size (default: 1)
-- `--episode_num_train`: Training episodes (default: 100)
-- `--episode_num_test`: Testing episodes (default: 75)
+- `--dataset_path`: Path to the image dataset (default: `./scalogram_images/`).
+- `--way_num`: Number of classes per episode (default: 3).
+- `--episode_num_train`: Number of episodes per epoch during training.
+- `--num_epochs`: Total number of training epochs.
+- `--device`: `cuda` or `cpu`.
 
-## Output
+## Results
 
-Trained models are saved to `checkpoints/` directory with accuracy in filename:
-- `pd_scalogram_1shot_0.9234.pth`
-- `pd_scalogram_5shot_0.9567.pth`
-
-## Architecture
-
-- **Dataloader**: Fewshot episode generation with support and query sets
-- **Model**: CovarianceNet with feature extraction and similarity matching
-- **Loss**: ContrastiveLoss for discriminative learning
+Results (checkpoints, confusion matrices, t-SNE plots) are saved in the `checkpoints/` folder (or root for images).

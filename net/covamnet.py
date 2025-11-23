@@ -41,39 +41,97 @@ class CovarianceNet(nn.Module):
             self.cuda()
 
     def forward(self, query, support):
-        # query: (batch, query_num, C, H, W) 
-        # support: (way, batch, shot, C, H, W)
+        """
+        Args:
+            query: (B, NQ, C, H, W) 
+            support: (B, Way, Shot, C, H, W)
+        Returns:
+            scores: (B * NQ, Way)
+        """
+        B, NQ, C, H, W = query.shape
+        B_s, Way, Shot, C_s, H_s, W_s = support.shape
         
-        q_shape = query.shape
-        s_shape = support.shape
+        # Flatten query to (B*NQ, C, H, W)
+        input1 = query.view(-1, C, H, W)
         
-        # Flatten query to (N_query, C, H, W)
-        # N_query = batch * query_num
-        input1 = query.view(-1, q_shape[-3], q_shape[-2], q_shape[-1])
+        # Flatten support to list of tensors per class per batch?
+        # My CovaBlock expects:
+        # x1 (query): (Batch, C, h, w) -> here Batch is B*NQ
+        # x2 (support): List of (Batch, Shot, C, h, w) ??
+        # Let's check CovaBlock.
+        # cal_covariance(input): input is list of tensors. 
+        # for i in range(len(input)): support_set_sam = input[i] ... (B, C, h, w)
+        # Wait, CovaBlock implementation in cova_block.py:
+        # support_set_sam = input[i]
+        # B, C, h, w = support_set_sam.size()
+        # ... covariance_matrix = ... div(..., h*w*B-1)
+        # Here 'B' in CovaBlock refers to the Shot dimension (number of samples per class).
         
-        # Flatten support to list of tensors per class
-        # support has shape (way, batch, shot, C, H, W)
-        input2 = []
-        num_ways = s_shape[0]
+        # So CovaBlock expects `input` to be a list of tensors, where each tensor is (Shot, C, h, w).
+        # AND `x1` (query) to be (Total_Query, C, h, w).
         
-        for i in range(num_ways):
-            # Flatten batch and shot dimensions for each way
-            s_way = support[i].view(-1, s_shape[-3], s_shape[-2], s_shape[-1])
-            input2.append(s_way)
-
-        # extract features of input1--query image
-        q = self.features(input1)
+        # But wait, if I process multiple batches (B > 1), CovaBlock might mix them if I just flatten B.
+        # CovaBlock `cal_similarity`:
+        # B, C, h, w = input.size() -> input is query.
+        # for i in range(B): ...
+        # It computes similarity for each query against the covariance matrices.
         
-        # extract features of input2--support set
-        S = []
-        for i in range(len(input2)):
-            S.append(self.features(input2[i]))
+        # If I have batching, the covariance matrices for batch b=0 are different from b=1.
+        # So I cannot simply flatten B and NQ together unless I also duplicate/arrange support covariances accordingly.
+        
+        # Current CovaBlock implementation seems to assume ONE set of support classes (one episode).
+        # If B > 1, we have multiple episodes.
+        # CovaBlock `cal_covariance` returns `CovaMatrix_list` (one per class).
+        # If we have B episodes, we need B sets of covariance matrices.
+        
+        # The provided CovaBlock code is:
+        # def cal_covariance(self, input):
+        #    for i in range(len(input)): ...
+        #    input[i] is (Shot, C, H, W).
+        
+        # It does NOT seem to handle batching of episodes. It handles batching of Queries against ONE support set.
+        
+        # So if I want to support B > 1 in `main.py`, I must iterate over B in `CovarianceNet.forward` or modify `CovaBlock`.
+        # Given `CovaBlock` is from the "author" (user provided), I should try to keep it or wrap it.
+        
+        # I'll wrap it in `CovarianceNet.forward`: iterate over the batch dimension.
+        
+        scores_list = []
+        
+        for b in range(B):
+            # Query for this batch: (NQ, C, H, W)
+            q_b = query[b] 
             
-        x = self.covariance(q, S) # get Batch*1*(h*w*num_classes)
-        x = self.classifier(x)    # get Batch*1*num_classes
-        x = x.squeeze(1)          # get Batch*num_classes
+            # Support for this batch: (Way, Shot, C, H, W)
+            s_b = support[b]
+            
+            # Prepare support for CovaBlock: List of (Shot, C, H, W)
+            s_input = [s_b[w] for w in range(Way)]
+            
+            # Extract features
+            q_feat = self.features(q_b) # (NQ, 64, h, w)
+            
+            s_feats = []
+            for w in range(Way):
+                sf = self.features(s_input[w]) # (Shot, 64, h, w)
+                s_feats.append(sf)
+            
+            # Calculate scores
+            # x = self.covariance(q_feat, s_feats) 
+            # But wait, CovaBlock.forward calls cal_covariance then cal_similarity.
+            # cal_similarity returns Cova_Sim: (NQ, 1, h*w*Way)
+            
+            x = self.covariance(q_feat, s_feats) 
+            
+            # Classifier
+            x = self.classifier(x) # (NQ, 1, Way)
+            x = x.squeeze(1) # (NQ, Way)
+            
+            scores_list.append(x)
+            
+        scores = torch.cat(scores_list, dim=0) # (B*NQ, Way)
         
-        return x
+        return scores
 
-# Expose CovaMNet as CovarianceNet for compatibility if needed
+# Expose CovaMNet as CovarianceNet
 CovaMNet = CovarianceNet
