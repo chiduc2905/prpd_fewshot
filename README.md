@@ -65,4 +65,4 @@ python main.py --model covamnet --shot_num 1 --mode test --weights checkpoints/m
 
 ## Results
 
-Results (checkpoints, confusion matrices, t-SNE plots) are saved in the `checkpoints/` folder (or root for images).
+Results (checkpoints, confusion matrices) are saved in the `checkpoints/` folder (or root for images).

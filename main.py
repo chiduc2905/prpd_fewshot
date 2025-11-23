@@ -13,7 +13,7 @@ from sklearn.metrics import precision_recall_fscore_support
 # Local imports
 from dataset import PDScalogram
 from dataloader.dataloader import FewshotDataset
-from function.function import ContrastiveLoss, seed_func, plot_confusion_matrix, plot_tsne
+from function.function import ContrastiveLoss, seed_func, plot_confusion_matrix
 
 # Models
 from net.cosine import CosineNet
@@ -245,15 +245,6 @@ def test_full(net, loader, args):
     # Plotting
     save_path_cm = os.path.join(res_dir, f"confusion_matrix_{args.model}_{args.shot_num}shot.png")
     plot_confusion_matrix(all_targets, all_preds, num_classes=args.way_num, save_path=save_path_cm)
-    
-    if all_features:
-        all_features = np.vstack(all_features)
-        all_targets_arr = np.array(all_targets)
-        save_path_tsne = os.path.join(res_dir, f"tsne_{args.model}_{args.shot_num}shot.png")
-        try:
-            plot_tsne(all_features, all_targets_arr, num_classes=args.way_num, save_path=save_path_tsne)
-        except Exception as e:
-            print(f"Skipping t-SNE: {e}")
 
 def main():
     args = get_args()
