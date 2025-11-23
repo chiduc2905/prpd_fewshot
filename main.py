@@ -8,6 +8,7 @@ import time
 from tqdm import tqdm
 import os
 from torch.utils.data import DataLoader
+from sklearn.metrics import precision_recall_fscore_support
 
 # Local imports
 from dataset import PDScalogram
@@ -25,6 +26,7 @@ def get_args():
     # Dataset / Paths
     parser.add_argument('--dataset_path', type=str, default='./scalogram_images/', help='Path to dataset')
     parser.add_argument('--path_weights', type=str, default='checkpoints/', help='Directory to save checkpoints')
+    parser.add_argument('--path_results', type=str, default='results/', help='Directory to save results')
     parser.add_argument('--weights', type=str, default=None, help='Path to specific weight file for testing')
     
     # Model
@@ -106,14 +108,12 @@ def train_loop(net, train_loader, val_loader, args):
         history['loss'].append(avg_loss)
         
         # Validation (Model Selection)
-        # Note: Using test_loader here as 'Validation' as per typical FewShot setup (Episode-based validation)
-        # But for final confusion matrix, we will run a dedicated test pass.
         acc = evaluate(net, val_loader, args)
         history['acc'].append(acc)
         
         print(f"Validation Accuracy: {acc:.4f}")
         
-        # Save Best Model based on Validation Accuracy
+        # Save Best Model
         if acc > best_acc:
             best_acc = acc
             save_name = f"{args.model}_{args.shot_num}shot_best.pth"
@@ -145,11 +145,21 @@ def evaluate(net, loader, args):
             
     return total_correct / total_samples if total_samples > 0 else 0
 
+def calculate_p_value(acc, baseline=0.33, n=75):
+    # Simple one-sample t-test approximation or binomial test for classification
+    # Here we use a simplified z-test for proportions
+    if n <= 0: return 1.0
+    p = acc
+    p0 = baseline
+    if p * (1 - p) == 0: return 0.0
+    z = (p - p0) / np.sqrt(p0 * (1 - p0) / n)
+    # Two-tailed p-value from z-score (simplified)
+    from scipy.stats import norm
+    p_value = 2 * (1 - norm.cdf(abs(z)))
+    return p_value
+
 def test_full(net, loader, args):
-    print(f"Testing model: {args.model}, {args.shot_num}-shot")
-    
-    # Strict separation: Confusion Matrix and t-SNE are generated from this TEST process
-    # We ensure this loader is the Test Loader (unseen episodes)
+    print(f"\n{'='*20} Testing Model: {args.model} ({args.shot_num}-shot) {'='*20}")
     
     all_preds = []
     all_targets = []
@@ -177,7 +187,7 @@ def test_full(net, loader, args):
             all_preds.extend(preds.cpu().numpy())
             all_targets.extend(targets.cpu().numpy())
             
-            # Extract Features for t-SNE
+            # Extract Features
             q_flat = q.view(-1, C, H, W)
             if hasattr(net, 'encoder'):
                 feat = net.encoder(q_flat)
@@ -193,16 +203,53 @@ def test_full(net, loader, args):
                  all_features.append(feat.cpu().numpy())
                  
     final_acc = total_correct / total_samples
-    print(f"Final Test Accuracy: {final_acc:.4f}")
+    
+    # Calculate Metrics: Precision, Recall, F1
+    precision, recall, f1, support = precision_recall_fscore_support(all_targets, all_preds, average='macro')
+    
+    # Calculate p-value (approximate, assuming random chance baseline = 1/num_classes)
+    try:
+        from scipy.stats import norm
+        p_value = calculate_p_value(final_acc, baseline=1.0/args.way_num, n=total_samples)
+    except ImportError:
+        p_value = 0.0
+        print("Warning: scipy not installed, p-value set to 0.0")
+
+    # Display Results
+    print("\n" + "="*50)
+    print(f"RESULTS SUMMARY: {args.model} {args.shot_num}-shot")
+    print("="*50)
+    print(f"Accuracy : {final_acc:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall   : {recall:.4f}")
+    print(f"F1-Score : {f1:.4f}")
+    print(f"p-value  : {p_value:.4e}")
+    print("="*50 + "\n")
+    
+    # Save Results to File
+    res_dir = args.path_results
+    if not os.path.exists(res_dir):
+        os.makedirs(res_dir)
+        
+    res_file = os.path.join(res_dir, f"results_{args.model}_{args.shot_num}shot.txt")
+    with open(res_file, 'w') as f:
+        f.write(f"Model: {args.model}\n")
+        f.write(f"Shot: {args.shot_num}\n")
+        f.write(f"Accuracy: {final_acc:.4f}\n")
+        f.write(f"Precision: {precision:.4f}\n")
+        f.write(f"Recall: {recall:.4f}\n")
+        f.write(f"F1-Score: {f1:.4f}\n")
+        f.write(f"p-value: {p_value:.4e}\n")
+    print(f"Results saved to {res_file}")
 
     # Plotting
-    save_path_cm = f"confusion_matrix_{args.model}_{args.shot_num}shot.png"
+    save_path_cm = os.path.join(res_dir, f"confusion_matrix_{args.model}_{args.shot_num}shot.png")
     plot_confusion_matrix(all_targets, all_preds, num_classes=args.way_num, save_path=save_path_cm)
     
     if all_features:
         all_features = np.vstack(all_features)
         all_targets_arr = np.array(all_targets)
-        save_path_tsne = f"tsne_{args.model}_{args.shot_num}shot.png"
+        save_path_tsne = os.path.join(res_dir, f"tsne_{args.model}_{args.shot_num}shot.png")
         try:
             plot_tsne(all_features, all_targets_arr, num_classes=args.way_num, save_path=save_path_tsne)
         except Exception as e:
@@ -215,9 +262,10 @@ def main():
     seed_func(args.seed)
     if not os.path.exists(args.path_weights):
         os.makedirs(args.path_weights)
+    if not os.path.exists(args.path_results):
+        os.makedirs(args.path_results)
         
     print("Loading Dataset...")
-    # Pass training_samples constraint to dataset loader
     dataset = PDScalogram(args.dataset_path, samples_per_class=args.training_samples)
     
     def prep_data(X, y):
@@ -235,7 +283,7 @@ def main():
                               episode_num=args.episode_num_train,
                               way_num=args.way_num,
                               shot_num=args.shot_num,
-                              query_num=args.query_num) # query_num determined by user or default
+                              query_num=args.query_num) 
                               
     test_ds = FewshotDataset(test_X, test_y,
                              episode_num=args.episode_num_test,
@@ -249,16 +297,13 @@ def main():
     net = get_model(args.model, args.device)
     
     if args.mode == 'train':
-        # Train and select best model based on validation accuracy
         train_loop(net, train_loader, test_loader, args)
         
         # Final Test Phase
-        # Load the best model selected during training
         best_path = os.path.join(args.path_weights, f"{args.model}_{args.shot_num}shot_best.pth")
         if os.path.exists(best_path):
             print(f"Loading best model for final test evaluation: {best_path}")
             net.load_state_dict(torch.load(best_path))
-            # Generate Confusion Matrix and t-SNE strictly from the Test Loader
             test_full(net, test_loader, args)
             
     elif args.mode == 'test':
