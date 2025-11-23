@@ -36,13 +36,14 @@ def get_args():
     parser.add_argument('--query_num', type=int, default=1, help='Number of query samples per class')
     
     # Training settings
+    parser.add_argument('--training_samples', type=int, default=None, help='Number of training samples per class (e.g. 30, 60). If None, use all.')
     parser.add_argument('--episode_num_train', type=int, default=100, help='Number of episodes per epoch (train)')
     parser.add_argument('--episode_num_test', type=int, default=75, help='Number of episodes per epoch (test)')
     parser.add_argument('--num_epochs', type=int, default=100, help='Total training epochs')
     parser.add_argument('--batch_size', type=int, default=1, help='Episodes per batch')
-    parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate (init value)')
     parser.add_argument('--step_size', type=int, default=10, help='Scheduler step size')
-    parser.add_argument('--gamma', type=float, default=0.5, help='Scheduler gamma')
+    parser.add_argument('--gamma', type=float, default=0.5, help='Scheduler gamma (factor of 2 reduction = 0.5)')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -81,32 +82,16 @@ def train_loop(net, train_loader, val_loader, args):
         # Training
         with tqdm(train_loader, desc=f'Epoch {epoch}/{args.num_epochs}', unit='batch') as t:
             for query_imgs, query_targets, support_imgs, support_targets in t:
-                # Prepare Data
-                # Loader returns:
-                # query_imgs: (B, Way*Query, C, H, W)
-                # support_imgs: (B, Way*Shot, C, H, W)
-                # targets: (B, Way*Query) - wait, let's check targets structure
-                
                 B, NQ_total, C, H, W = query_imgs.shape
                 _, NS_total, _, _, _ = support_imgs.shape
                 
-                # Reshape Support: (B, Way, Shot, C, H, W)
-                # Assuming support_imgs is ordered by way then shot
                 s = support_imgs.view(B, args.way_num, args.shot_num, C, H, W).to(device)
-                
-                # Reshape Query: (B, NQ_total, C, H, W) - keep as is, just move to device
                 q = query_imgs.to(device)
-                
-                # Targets
-                targets = query_targets.view(-1).to(device) # Flatten to (B*NQ_total)
+                targets = query_targets.view(-1).to(device) 
                 
                 optimizer.zero_grad()
                 
-                # Forward
-                # Model returns (B*NQ_total, Way) scores
                 scores = net(q, s)
-                
-                # Loss
                 loss = loss_fn(scores, targets)
                 loss.backward()
                 optimizer.step()
@@ -120,13 +105,15 @@ def train_loop(net, train_loader, val_loader, args):
         avg_loss = running_loss / total_batches
         history['loss'].append(avg_loss)
         
-        # Validation
+        # Validation (Model Selection)
+        # Note: Using test_loader here as 'Validation' as per typical FewShot setup (Episode-based validation)
+        # But for final confusion matrix, we will run a dedicated test pass.
         acc = evaluate(net, val_loader, args)
         history['acc'].append(acc)
         
         print(f"Validation Accuracy: {acc:.4f}")
         
-        # Save Best
+        # Save Best Model based on Validation Accuracy
         if acc > best_acc:
             best_acc = acc
             save_name = f"{args.model}_{args.shot_num}shot_best.pth"
@@ -138,95 +125,32 @@ def train_loop(net, train_loader, val_loader, args):
 
 def evaluate(net, loader, args):
     net.eval()
-    # Using the helper functions from function.py for consistency with legacy metrics
-    # But we need to make sure they work with our models. 
-    # The helper functions cal_accuracy_fewshot_* iterate the loader themselves.
-    # And they assume specific input handling inside.
-    
-    # CAUTION: function.py's cal_accuracy_fewshot_1shot iterates:
-    # for q, qt, s, st in loader:
-    #    q = q.permute(1, 0, 2, 3, 4)
-    #    for i in range(len(q)): ...
-    
-    # My models now expect (B, NQ, ...) and (B, Way, Shot, ...).
-    # The legacy functions might break if I don't adapt them OR the models.
-    # My models forward() method is flexible enough?
-    # Legacy function:
-    # q input: (Batch, Way, Query, C, H, W) -> permute(1,0,...) -> (Way, Batch, Query, ...)
-    # q[i] -> (Batch, Query, ...) -> perfect for my model's (B, NQ, ...)
-    # s input: (Batch, Way, Shot, ...) -> permute(1,0,...) -> (Way, Batch, Shot, ...)
-    
-    # Wait, in `dataloader.py`, I saw:
-    # return query_images (B, Way*Query, ...), support_images (B, Way*Shot, ...)
-    
-    # If `cal_accuracy_fewshot_1shot` in `function.py` expects the OLD format, it might be incompatible with `dataloader.py` OUTPUT.
-    # Let's re-read `function.py` carefully.
-    
-    # function.py:
-    # for query_images, query_targets, support_images, support_targets in loader:
-    #    q = query_images.permute(1, 0, 2, 3, 4)
-    
-    # This implies `query_images` has 5 dimensions.
-    # But `dataloader.py` returns 5 dims?
-    # query_images list of (Query, C, H, W).
-    # torch.cat(dim=0) -> (Way*Query, C, H, W).
-    # DataLoader adds Batch -> (Batch, Way*Query, C, H, W).
-    # This is 5 dimensions.
-    
-    # So `permute(1, 0, 2, 3, 4)` switches dim 0 (Batch) and dim 1 (Way*Query).
-    # Result: (Way*Query, Batch, C, H, W).
-    
-    # Then `for i in range(len(q))` iterates over `Way*Query`.
-    # `q[i]` is `(Batch, C, H, W)`.
-    # `net(q[i], s)`
-    
-    # My models expect:
-    # query: (B, NQ, C, H, W). If I pass `q[i]`, it is (B, C, H, W).
-    # `q[i].unsqueeze(1)` would make it (B, 1, C, H, W).
-    
-    # AND support `s` in `function.py`:
-    # s = support_images.permute(1, 0, 2, 3, 4) -> (Way*Shot, Batch, C, H, W).
-    
-    # My models expect support: (B, Way, Shot, C, H, W).
-    # The legacy function passes (Way*Shot, Batch, C, H, W) or similar.
-    
-    # CONCLUSION: I cannot use the legacy `cal_accuracy_fewshot` functions directly with my new `forward` signatures 
-    # UNLESS I modify the `forward` signatures to detect and reshape, OR I write a new evaluation loop.
-    
-    # I will write a NEW evaluation loop here to be clean and professional.
-    
     total_correct = 0
     total_samples = 0
-    
     device = args.device
     
     with torch.no_grad():
         for query_imgs, query_targets, support_imgs, support_targets in loader:
             B, NQ_total, C, H, W = query_imgs.shape
             
-            # Reshape Data
             s = support_imgs.view(B, args.way_num, args.shot_num, C, H, W).to(device)
             q = query_imgs.to(device)
             targets = query_targets.view(-1).to(device)
             
-            # Forward
-            scores = net(q, s) # (B*NQ_total, Way)
-            
-            # Predictions
+            scores = net(q, s)
             preds = torch.argmax(scores, dim=1)
             
             total_correct += (preds == targets).sum().item()
             total_samples += targets.size(0)
             
-    return total_correct / total_samples
+    return total_correct / total_samples if total_samples > 0 else 0
 
 def test_full(net, loader, args):
     print(f"Testing model: {args.model}, {args.shot_num}-shot")
-    acc = evaluate(net, loader, args)
-    print(f"Test Accuracy: {acc:.4f}")
     
-    # Confusion Matrix & t-SNE
-    # We need to gather all preds and targets
+    # Strict separation: Confusion Matrix and t-SNE are generated from this TEST process
+    # We ensure this loader is the Test Loader (unseen episodes)
+    
     all_preds = []
     all_targets = []
     all_features = []
@@ -234,6 +158,9 @@ def test_full(net, loader, args):
     device = args.device
     net.eval()
     
+    total_correct = 0
+    total_samples = 0
+
     with torch.no_grad():
         for query_imgs, query_targets, support_imgs, support_targets in tqdm(loader, desc="Testing"):
             B, NQ_total, C, H, W = query_imgs.shape
@@ -244,14 +171,13 @@ def test_full(net, loader, args):
             scores = net(q, s)
             preds = torch.argmax(scores, dim=1)
             
+            total_correct += (preds == targets).sum().item()
+            total_samples += targets.size(0)
+            
             all_preds.extend(preds.cpu().numpy())
             all_targets.extend(targets.cpu().numpy())
             
-            # Features for t-SNE (extract from query)
-            # Depending on model, we might want features before classifier
-            # All my models have 'encoder' or 'features'
-            
-            # Flatten q for encoding
+            # Extract Features for t-SNE
             q_flat = q.view(-1, C, H, W)
             if hasattr(net, 'encoder'):
                 feat = net.encoder(q_flat)
@@ -261,12 +187,14 @@ def test_full(net, loader, args):
                 feat = None
             
             if feat is not None:
-                 # Global pool if needed
                  if feat.dim() > 2:
                      feat = nn.functional.adaptive_avg_pool2d(feat, (1, 1))
                      feat = feat.view(feat.size(0), -1)
                  all_features.append(feat.cpu().numpy())
                  
+    final_acc = total_correct / total_samples
+    print(f"Final Test Accuracy: {final_acc:.4f}")
+
     # Plotting
     save_path_cm = f"confusion_matrix_{args.model}_{args.shot_num}shot.png"
     plot_confusion_matrix(all_targets, all_preds, num_classes=args.way_num, save_path=save_path_cm)
@@ -284,20 +212,17 @@ def main():
     args = get_args()
     print(f"Configuration: {args}")
     
-    # Setup
-    seed_func()
+    seed_func(args.seed)
     if not os.path.exists(args.path_weights):
         os.makedirs(args.path_weights)
         
-    # Data
     print("Loading Dataset...")
-    dataset = PDScalogram(args.dataset_path)
+    # Pass training_samples constraint to dataset loader
+    dataset = PDScalogram(args.dataset_path, samples_per_class=args.training_samples)
     
-    # Helper to prep data
     def prep_data(X, y):
-        # Convert to tensor and permute to (N, C, H, W)
         X = torch.from_numpy(X.astype(np.float32))
-        if X.dim() == 4 and X.shape[3] == 3: # (N, H, W, C)
+        if X.dim() == 4 and X.shape[3] == 3: 
              X = X.permute(0, 3, 1, 2)
         y = torch.from_numpy(y)
         return X, y
@@ -305,11 +230,12 @@ def main():
     train_X, train_y = prep_data(dataset.X_train, dataset.y_train)
     test_X, test_y = prep_data(dataset.X_test, dataset.y_test)
     
+    # Create Episode Generators
     train_ds = FewshotDataset(train_X, train_y, 
                               episode_num=args.episode_num_train,
                               way_num=args.way_num,
                               shot_num=args.shot_num,
-                              query_num=args.query_num)
+                              query_num=args.query_num) # query_num determined by user or default
                               
     test_ds = FewshotDataset(test_X, test_y,
                              episode_num=args.episode_num_test,
@@ -320,26 +246,28 @@ def main():
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
     
-    # Model
     net = get_model(args.model, args.device)
     
     if args.mode == 'train':
+        # Train and select best model based on validation accuracy
         train_loop(net, train_loader, test_loader, args)
-        # Test best model
+        
+        # Final Test Phase
+        # Load the best model selected during training
         best_path = os.path.join(args.path_weights, f"{args.model}_{args.shot_num}shot_best.pth")
         if os.path.exists(best_path):
-            print(f"Loading best model for final test: {best_path}")
+            print(f"Loading best model for final test evaluation: {best_path}")
             net.load_state_dict(torch.load(best_path))
+            # Generate Confusion Matrix and t-SNE strictly from the Test Loader
             test_full(net, test_loader, args)
             
     elif args.mode == 'test':
         if args.weights is None:
-            # Try to find best model default
             best_path = os.path.join(args.path_weights, f"{args.model}_{args.shot_num}shot_best.pth")
             if os.path.exists(best_path):
                 args.weights = best_path
             else:
-                print("Warning: No weights provided and no default best model found. Testing with random init.")
+                print("Warning: No weights provided. Testing with random init.")
         
         if args.weights:
             print(f"Loading weights: {args.weights}")
