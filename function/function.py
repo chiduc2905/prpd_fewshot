@@ -99,7 +99,7 @@ def plot_tsne(features, labels, num_classes=3, save_path=None):
     # Perplexity must be less than n_samples
     perp = min(30, n_samples - 1) if n_samples > 1 else 1
     
-    tsne = TSNE(n_components=2, random_state=42, perplexity=perp, n_iter=1000)
+    tsne = TSNE(n_components=2, random_state=42, perplexity=perp)
     features_embedded = tsne.fit_transform(features)
     
     # Setup plot

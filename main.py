@@ -234,10 +234,14 @@ def test_full(net, loader, args):
     if not os.path.exists(res_dir):
         os.makedirs(res_dir)
         
-    res_file = os.path.join(res_dir, f"results_{args.model}_{args.shot_num}shot.txt")
+    training_samples_str = f"_{args.training_samples}samples" if args.training_samples is not None else "_allsamples"
+    res_file = os.path.join(res_dir, f"results_{args.model}_{args.shot_num}shot{training_samples_str}.txt")
+    
+    # Save individual result
     with open(res_file, 'w') as f:
         f.write(f"Model: {args.model}\n")
         f.write(f"Shot: {args.shot_num}\n")
+        f.write(f"Training Samples: {args.training_samples}\n")
         f.write(f"Accuracy: {final_acc:.4f}\n")
         f.write(f"Precision: {precision:.4f}\n")
         f.write(f"Recall: {recall:.4f}\n")
@@ -245,9 +249,19 @@ def test_full(net, loader, args):
         f.write(f"p-value: {p_value:.4e}\n")
     print(f"Results saved to {res_file}")
 
+    # Append to summary file for this sample size
+    summary_file = os.path.join(res_dir, f"summary{training_samples_str}.txt")
+    with open(summary_file, 'a') as f:
+        # Check if file is empty to write header
+        if os.stat(summary_file).st_size == 0:
+            f.write("Model\tShot\tAccuracy\tPrecision\tRecall\tF1\tp-value\n")
+        f.write(f"{args.model}\t{args.shot_num}\t{final_acc:.4f}\t{precision:.4f}\t{recall:.4f}\t{f1:.4f}\t{p_value:.4e}\n")
+    print(f"Summary appended to {summary_file}")
+
+
     # Plotting
     # Confusion Matrix
-    save_path_cm = os.path.join(res_dir, f"confusion_matrix_{args.model}_{args.shot_num}shot.png")
+    save_path_cm = os.path.join(res_dir, f"confusion_matrix_{args.model}_{args.shot_num}shot{training_samples_str}.png")
     try:
         plot_confusion_matrix(all_targets, all_preds, num_classes=args.way_num, save_path=save_path_cm)
     except Exception as e:
@@ -257,7 +271,7 @@ def test_full(net, loader, args):
     if all_features:
         all_features = np.vstack(all_features)
         all_targets_arr = np.array(all_targets)
-        save_path_tsne = os.path.join(res_dir, f"tsne_{args.model}_{args.shot_num}shot.png")
+        save_path_tsne = os.path.join(res_dir, f"tsne_{args.model}_{args.shot_num}shot{training_samples_str}.png")
         try:
             # Use only a subset if points > 2000 for speed, or full set for accuracy
             plot_tsne(all_features, all_targets_arr, num_classes=args.way_num, save_path=save_path_tsne)
