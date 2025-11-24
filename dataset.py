@@ -35,8 +35,9 @@ class PDScalogram:
         self.X_test = []
         self.y_test = []
         
-        # Define Normalization Transform
+        # Define Normalization Transform with Resize
         self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
@@ -97,7 +98,7 @@ class PDScalogram:
             for fname in train_files:
                 fpath = os.path.join(class_path, fname)
                 img = Image.open(fpath).convert('RGB')
-                # self.transform handles ToTensor and Normalize
+                # self.transform handles Resize, ToTensor and Normalize
                 img_tensor = self.transform(img)
                 self.X_train.append(img_tensor.numpy())
                 self.y_train.append(class_label)
