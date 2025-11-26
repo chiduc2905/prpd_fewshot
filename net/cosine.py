@@ -1,10 +1,14 @@
+"""Cosine Similarity Network for few-shot learning."""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from net.encoder import Conv64F_Encoder
 from net.utils import init_weights
 
+
 class CosineNet(nn.Module):
+    """Few-shot classifier using cosine similarity metric."""
+    
     def __init__(self, init_type='normal', use_gpu=True):
         super(CosineNet, self).__init__()
         self.encoder = Conv64F_Encoder()
@@ -16,12 +20,13 @@ class CosineNet(nn.Module):
             self.cuda()
 
     def forward(self, query, support):
-        """
+        """Compute cosine similarity scores.
+        
         Args:
-            query: (B, NQ, C, H, W)
-            support: (B, Way, Shot, C, H, W)
+            query: (B, NQ, C, H, W) query images
+            support: (B, Way, Shot, C, H, W) support images
         Returns:
-            scores: (B * NQ, Way) - Cosine similarity
+            scores: (B*NQ, Way) cosine similarity
         """
         B, NQ, C, H, W = query.size()
         B_s, Way, Shot, C_s, H_s, W_s = support.size()

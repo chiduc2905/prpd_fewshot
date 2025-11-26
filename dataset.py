@@ -1,3 +1,8 @@
+"""PD Scalogram Dataset Loader.
+
+Input: 64x64 RGB images, auto-normalized from dataset statistics.
+Split: 70% train / 30% test.
+"""
 import os
 import numpy as np
 from PIL import Image
@@ -5,20 +10,17 @@ from sklearn.utils import shuffle
 import random
 import torchvision.transforms as transforms
 
-class_idx = {
-    'corona': 0,
-    'no_pd': 1,
-    'surface': 2
-}
+class_idx = {'corona': 0, 'no_pd': 1, 'surface': 2}
+
 
 class PDScalogram:
+    """Dataset loader with auto-computed normalization."""
+    
     def __init__(self, data_path, total_training_samples=None):
         """
         Args:
-            data_path: Path to dataset
-            total_training_samples: If set (e.g. 30, 60), this is the TOTAL number of training samples 
-                                    across all classes. They will be distributed evenly among classes.
-                                    If None, use all available training data.
+            data_path: Path to dataset directory.
+            total_training_samples: Limit total training samples (distributed evenly across classes).
         """
         self.data_path = data_path
         self.total_training_samples = total_training_samples
@@ -52,7 +54,7 @@ class PDScalogram:
         self._shuffle()
     
     def _compute_mean_std(self):
-        """Compute mean and std from all images in the dataset."""
+        """Compute per-channel mean and std from dataset."""
         print("Computing dataset mean and std...")
         all_pixels = []
         
@@ -87,7 +89,7 @@ class PDScalogram:
         ])
         
     def _load_data(self):
-        # Dataset split: 70% train, 30% test
+        """Load and split data: 70% train / 30% test."""
         
         for class_name, class_label in class_idx.items():
             class_path = os.path.join(self.data_path, class_name)

@@ -1,3 +1,4 @@
+"""Training and testing script for PD Scalogram few-shot classification."""
 import torch
 import numpy as np
 import torch.nn as nn
@@ -10,18 +11,16 @@ import os
 from torch.utils.data import DataLoader
 from sklearn.metrics import precision_recall_fscore_support
 
-# Local imports
 from dataset import PDScalogram
 from dataloader.dataloader import FewshotDataset
 from function.function import ContrastiveLoss, seed_func, plot_confusion_matrix, plot_tsne
-
-# Models
 from net.cosine import CosineNet
 from net.protonet import ProtoNet
 from net.covamnet import CovaMNet
 
 def get_args():
-    parser = argparse.ArgumentParser(description='PD Scalogram Fewshot Training & Testing')
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='PD Scalogram Few-shot Learning')
     
     # Dataset / Paths
     parser.add_argument('--dataset_path', type=str, default='./scalogram_images/', help='Path to dataset')
@@ -55,6 +54,7 @@ def get_args():
     return parser.parse_args()
 
 def get_model(model_name, device):
+    """Initialize model by name."""
     if model_name == 'cosine':
         model = CosineNet(use_gpu=(device=='cuda'))
     elif model_name == 'protonet':
@@ -66,6 +66,7 @@ def get_model(model_name, device):
     return model.to(device)
 
 def train_loop(net, train_loader, test_loader, args):
+    """Training loop with test-based model selection."""
     device = args.device
     optimizer = optim.Adam(net.parameters(), lr=args.lr)
     scheduler = lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
@@ -124,6 +125,7 @@ def train_loop(net, train_loader, test_loader, args):
     return history
 
 def evaluate(net, loader, args):
+    """Evaluate model accuracy on loader."""
     net.eval()
     total_correct = 0
     total_samples = 0
@@ -146,13 +148,11 @@ def evaluate(net, loader, args):
     return total_correct / total_samples if total_samples > 0 else 0
 
 def calculate_p_value(acc, baseline=0.33, n=75):
-    # Simple one-sample t-test approximation or binomial test for classification
-    # Here we use a simplified z-test for proportions
-    if n <= 0: return 1.0
+    """Calculate p-value using z-test for proportions."""
+    if n <= 0:
+        return 1.0
     p = acc
     p0 = baseline
-    # Removed the check for p*(1-p)==0 to allow calculation even if accuracy is 1.0 or 0.0
-    # The standard error uses p0 (null hypothesis), not p.
     z = (p - p0) / np.sqrt(p0 * (1 - p0) / n)
     
     # Two-tailed p-value from z-score
@@ -162,7 +162,8 @@ def calculate_p_value(acc, baseline=0.33, n=75):
     return p_value
 
 def test_full(net, loader, args):
-    print(f"\n{'='*20} Testing Model: {args.model} ({args.shot_num}-shot) {'='*20}")
+    """Full evaluation with metrics, confusion matrix, and t-SNE."""
+    print(f"\n{'='*20} Testing: {args.model} ({args.shot_num}-shot) {'='*20}")
     
     all_preds = []
     all_targets = []
@@ -281,16 +282,17 @@ def test_full(net, loader, args):
 
 
 def main():
+    """Main entry point."""
     args = get_args()
     
-    # Set defaults based on shot_num if not provided
+    # Set defaults based on shot_num
     if args.query_num is None:
         args.query_num = 19 if args.shot_num == 1 else 15
-        print(f"Using default query_num={args.query_num} for {args.shot_num}-shot")
+        print(f"query_num={args.query_num} for {args.shot_num}-shot")
     
     if args.num_epochs is None:
         args.num_epochs = 100 if args.shot_num == 1 else 50
-        print(f"Using default num_epochs={args.num_epochs} for {args.shot_num}-shot (use early stopping)")
+        print(f"num_epochs={args.num_epochs} for {args.shot_num}-shot")
     
     print(f"Configuration: {args}")
     
@@ -300,8 +302,7 @@ def main():
     if not os.path.exists(args.path_results):
         os.makedirs(args.path_results)
         
-    print("Loading Dataset...")
-    # Pass total_training_samples constraint to dataset loader
+    print("Loading dataset...")
     dataset = PDScalogram(args.dataset_path, total_training_samples=args.training_samples)
     
     def prep_data(X, y):
@@ -314,7 +315,7 @@ def main():
     train_X, train_y = prep_data(dataset.X_train, dataset.y_train)
     test_X, test_y = prep_data(dataset.X_test, dataset.y_test)
     
-    # Create Episode Generators
+    # Episode generators
     train_ds = FewshotDataset(train_X, train_y, 
                               episode_num=args.episode_num_train,
                               way_num=args.way_num,

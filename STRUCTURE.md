@@ -1,80 +1,60 @@
-# Model Training & Testing Commands
+# Project Structure
 
-Use the following commands to train and test the different models. Ensure your dataset is located at `./scalogram_images/` or specify the path with `--dataset_path`.
+## Architecture Overview
 
-## Dataset Configuration
-- Dataset split: **70% train / 15% validation / 15% test**
-- N-way K-shot setup:
-  - **1-shot**: N=3, K=1, Q=19 (episodes/epoch=1000, epochs=100-300)
-  - **5-shot**: N=3, K=5, Q=15 (episodes/epoch=600, epochs=50-200)
+```
+Input (3×64×64) → Conv64F_Encoder → Features (64×16×16) → Model Head → Scores
+```
 
-## Common Arguments
-- `--model`: `covamnet`, `protonet`, or `cosine`.
-- `--shot_num`: Number of support samples (1 or 5).
-- `--query_num`: Number of query samples per class. Default: 19 for 1-shot, 15 for 5-shot.
-- `--training_samples`: **Total** number of training samples across all classes (e.g., 30, 60). If set to 60 with 3 classes, it uses 20 samples per class. Omit to use all available data.
-- `--episode_num_train`: Number of episodes per epoch during training. Default: 1000 for 1-shot, 600 for 5-shot.
-- `--num_epochs`: Number of training epochs. Default: 100 for 1-shot, 50 for 5-shot (use early stopping).
-- `--mode`: `train` or `test`.
+### Encoder: Conv64F_Encoder
+4-layer CNN with 2 max-pooling layers. Output: 64×16×16 feature maps.
 
----
+### Models
+| Model | Head | Metric |
+|-------|------|--------|
+| CosineNet | AvgPool → FC(64) | Cosine similarity |
+| ProtoNet | AvgPool | Negative Euclidean distance |
+| CovaMNet | CovaBlock → Conv1d | Covariance-based similarity |
 
-## 1. CovaMNet (Covariance Metric Network)
+## File Structure
 
-**1-Shot Training (default: Q=19, episodes/epoch=1000, epochs=100):**
+```
+├── main.py              # Training & testing entry point
+├── dataset.py           # PDScalogram loader (64×64, auto-norm)
+├── dataloader/
+│   └── dataloader.py    # FewshotDataset (episodic sampling)
+├── net/
+│   ├── encoder.py       # Conv64F_Encoder backbone
+│   ├── cosine.py        # CosineNet
+│   ├── protonet.py      # ProtoNet
+│   ├── covamnet.py      # CovaMNet
+│   ├── cova_block.py    # Covariance block
+│   └── utils.py         # Weight initialization
+├── function/
+│   └── function.py      # Loss, metrics, visualization
+├── checkpoints/         # Model weights
+└── results/             # Metrics, plots
+```
+
+## Training Commands
+
 ```bash
+# CovaMNet 1-shot
 python main.py --model covamnet --shot_num 1 --mode train
-```
 
-**1-Shot Training with Limited Samples (Total 30 training samples - 10/class):**
-```bash
-python main.py --model covamnet --shot_num 1 --training_samples 30 --mode train
-```
-
-**5-Shot Training (default: Q=15, episodes/epoch=600, epochs=50):**dd
-```bash
-python main.py --model covamnet --shot_num 5 --mode train
-```
-
-**Testing Only:**
-```bash
-python main.py --model covamnet --shot_num 1 --mode test
-```
-
----
-
-## 2. ProtoNet (Prototypical Network)
-
-**1-Shot Training:**
-```bash
-python main.py --model protonet --shot_num 1 --mode train
-```
-
-**5-Shot Training:**
-```bash
+# ProtoNet 5-shot
 python main.py --model protonet --shot_num 5 --mode train
+
+# CosineNet with limited samples
+python main.py --model cosine --training_samples 60 --mode train
 ```
 
-**Testing Only:**
+## Testing Commands
+
 ```bash
-python main.py --model protonet --shot_num 1 --mode test
-```
+# Auto-load best checkpoint
+python main.py --model covamnet --shot_num 1 --mode test
 
----
-
-## 3. CosineNet (Cosine Similarity Network)
-
-**1-Shot Training:**
-```bash
-python main.py --model cosine --shot_num 1 --mode train
-```
-
-**5-Shot Training:**
-```bash
-python main.py --model cosine --shot_num 5 --mode train
-```
-
-**Testing Only:**
-```bash
-python main.py --model cosine --shot_num 1 --mode test
+# Custom weights
+python main.py --model covamnet --weights path/to/model.pth --mode test
 ```
