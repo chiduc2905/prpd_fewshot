@@ -1,7 +1,7 @@
 """PD Scalogram Dataset Loader.
 
 Input: 64x64 RGB images, auto-normalized from dataset statistics.
-Split: 70% train / 30% test.
+Split: Train (fixed by --training_samples) / Val (50% remaining) / Test (50% remaining).
 """
 import os
 import numpy as np
@@ -20,7 +20,8 @@ class PDScalogram:
         """
         Args:
             data_path: Path to dataset directory.
-            total_training_samples: Limit total training samples (distributed evenly across classes).
+            total_training_samples: Fixed total training samples (distributed evenly across classes).
+                                    Remaining samples split 50/50 for val/test.
         """
         self.data_path = data_path
         self.total_training_samples = total_training_samples
@@ -34,6 +35,8 @@ class PDScalogram:
         
         self.X_train = []
         self.y_train = []
+        self.X_val = []
+        self.y_val = []
         self.X_test = []
         self.y_test = []
         
@@ -89,7 +92,22 @@ class PDScalogram:
         ])
         
     def _load_data(self):
-        """Load and split data: 70% train / 30% test."""
+        """Load and split data: Train (fixed) / Val (50% remain) / Test (50% remain)."""
+        
+        # First pass: find min class size for balancing
+        class_file_counts = {}
+        for class_name in class_idx.keys():
+            class_path = os.path.join(self.data_path, class_name)
+            if os.path.exists(class_path):
+                files = [f for f in os.listdir(class_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                class_file_counts[class_name] = len(files)
+        
+        min_class_size = min(class_file_counts.values())
+        print(f"Balancing dataset: using {min_class_size} samples per class (based on min class)")
+        
+        # Reserve a fixed eval pool per class (val & test use the same pool)
+        eval_per_class = min(75, min_class_size)
+        print(f"Reserving {eval_per_class} samples per class for validation/test pool. Remaining samples go to training pool.")
         
         for class_name, class_label in class_idx.items():
             class_path = os.path.join(self.data_path, class_name)
@@ -106,21 +124,16 @@ class PDScalogram:
             # Shuffle files with fixed seed for reproducibility
             random.Random(42).shuffle(files)
             
-            # Calculate split sizes (70% train, 30% test)
-            total_files = len(files)
-            train_size = int(total_files * 0.7)
-            # Remaining goes to test
-            
-            # Apply training_samples limit if specified
-            if self.total_training_samples is not None:
-                samples_per_class_train = self.total_training_samples // self.nclasses
-                train_size = min(train_size, samples_per_class_train)
-                print(f"Limiting training data: {samples_per_class_train} samples per class "
-                      f"(Total: {self.total_training_samples})")
-            
-            # Split files
-            train_files = files[:train_size]
-            test_files = files[train_size:]
+            # Limit to min_class_size for balance
+            files = files[:min_class_size]
+
+            # Reserve eval_per_class files for val/test (both will use this pool)
+            eval_files = files[:eval_per_class]
+            remaining_files = files[eval_per_class:]
+            # Remaining files are used as the training pool (all available)
+            train_files = remaining_files
+            val_files = eval_files
+            test_files = eval_files
             
             # Load Train
             for fname in train_files:
@@ -130,7 +143,13 @@ class PDScalogram:
                 self.X_train.append(img_tensor.numpy())
                 self.y_train.append(class_label)
             
-            # Load Test
+            # Load Val and Test from the same eval pool
+            for fname in val_files:
+                fpath = os.path.join(class_path, fname)
+                img = Image.open(fpath).convert('RGB')
+                img_tensor = self.transform(img)
+                self.X_val.append(img_tensor.numpy())
+                self.y_val.append(class_label)
             for fname in test_files:
                 fpath = os.path.join(class_path, fname)
                 img = Image.open(fpath).convert('RGB')
@@ -140,25 +159,32 @@ class PDScalogram:
                 
         self.X_train = np.array(self.X_train)
         self.y_train = np.array(self.y_train)
+        self.X_val = np.array(self.X_val)
+        self.y_val = np.array(self.y_val)
         self.X_test = np.array(self.X_test)
         self.y_test = np.array(self.y_test)
         
-        print(f"Data loaded: Train: {len(self.X_train)} (Total), Test: {len(self.X_test)} (Total)")
+        print(f"Data loaded: Train={len(self.X_train)}, Val={len(self.X_val)}, Test={len(self.X_test)}")
         
-        # Balance Check
-        unique_train, counts_train = np.unique(self.y_train, return_counts=True)
-        unique_test, counts_test = np.unique(self.y_test, return_counts=True)
-        print(f"Training Class Distribution: {dict(zip(unique_train, counts_train))}")
-        print(f"Test Class Distribution: {dict(zip(unique_test, counts_test))}")
+        # Distribution check
+        for name, y in [('Train', self.y_train), ('Val', self.y_val), ('Test', self.y_test)]:
+            unique, counts = np.unique(y, return_counts=True)
+            print(f"{name} distribution: {dict(zip(unique, counts))}")
 
     def _shuffle(self):
-        # shuffle training samples
+        # Shuffle training samples
         index = list(range(self.X_train.shape[0]))
         random.Random(0).shuffle(index)
         self.X_train = self.X_train[index]
         self.y_train = np.array(tuple(self.y_train[i] for i in index))
 
-        # shuffle test samples
+        # Shuffle val samples
+        index = list(range(self.X_val.shape[0]))
+        random.Random(0).shuffle(index)
+        self.X_val = self.X_val[index]
+        self.y_val = np.array(tuple(self.y_val[i] for i in index))
+
+        # Shuffle test samples
         index = list(range(self.X_test.shape[0]))
         random.Random(0).shuffle(index)
         self.X_test = self.X_test[index]

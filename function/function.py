@@ -37,16 +37,21 @@ class ContrastiveLoss(nn.Module):
 
 def plot_confusion_matrix(true_labels, predictions, num_classes=3, save_path=None):
     """
-    Plot confusion matrix with style matching the reference image.
-    Designed for 3-class classification.
+    Plot confusion matrix for few-shot evaluation.
+    
+    For final test (150 episodes, 1-query/class): each row sums to 150.
+    Shows count and percentage per cell.
     """
     conf_matrix = confusion_matrix(true_labels, predictions)
     
-    # Calculate percentages
+    # Calculate percentages (row-wise)
     row_sums = conf_matrix.sum(axis=1)[:, np.newaxis]
     # Avoid division by zero
     row_sums[row_sums == 0] = 1
     conf_matrix_percent = conf_matrix.astype('float') / row_sums * 100
+    
+    # Row sum for title (should be 150 for final test)
+    samples_per_class = int(conf_matrix.sum(axis=1)[0]) if conf_matrix.shape[0] > 0 else 0
     
     # Create figure
     fig, ax = plt.subplots(figsize=(8, 7))
@@ -69,7 +74,7 @@ def plot_confusion_matrix(true_labels, predictions, num_classes=3, save_path=Non
     # Customize labels and title
     ax.set_xlabel('Predicted Labels', fontsize=12, fontweight='normal')
     ax.set_ylabel('True Labels', fontsize=12, fontweight='normal')
-    ax.set_title('Confusion Matrix', fontsize=13, fontweight='normal', pad=15)
+    ax.set_title(f'Confusion Matrix ({samples_per_class} samples/class)', fontsize=13, fontweight='normal', pad=15)
     
     # Set tick labels
     ax.set_xticklabels(range(num_classes), fontsize=10)
@@ -84,15 +89,9 @@ def plot_confusion_matrix(true_labels, predictions, num_classes=3, save_path=Non
 
 def plot_tsne(features, labels, num_classes=3, save_path=None):
     """
-    Plot t-SNE visualization of features.
+    Plot t-SNE visualization of query features from few-shot test.
     
-    Requirements:
-    - Use seaborn or matplotlib
-    - Each class gets a different color
-    - Scatter points, round shape, size ~30-40
-    - Slight transparency (alpha approx 0.7)
-    - White background
-    - No grid
+    For final test (150 episodes, 1-query/class): 150 * num_classes = 450 points.
     """
     # Run t-SNE
     n_samples = len(features)
@@ -107,24 +106,23 @@ def plot_tsne(features, labels, num_classes=3, save_path=None):
     sns.set_style("white")  # White background, no grid
     
     # Create scatter plot
-    # Using seaborn scatterplot for easy legend and hue handling
     scatter = sns.scatterplot(
         x=features_embedded[:, 0],
         y=features_embedded[:, 1],
         hue=labels,
         palette=sns.color_palette("bright", n_colors=num_classes),
-        style=labels,      # Optional: different markers for classes if desired, but user asked for round shape
-        markers=['o'] * num_classes, # Ensure all are round
+        style=labels,
+        markers=['o'] * num_classes,  # Round markers
         s=40,              # Size 30-40
-        alpha=0.7,         # Transparency 0.7
+        alpha=0.7,         # Transparency
         legend='full'
     )
     
-    # Remove grid and spines if needed (sns.set_style("white") handles most, but ensuring)
+    # Remove grid and spines
     sns.despine()
     plt.grid(False)
     
-    plt.title("t-SNE Visualization", fontsize=15)
+    plt.title(f"t-SNE Visualization ({n_samples} samples)", fontsize=15)
     plt.xlabel("Dimension 1", fontsize=12)
     plt.ylabel("Dimension 2", fontsize=12)
     

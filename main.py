@@ -65,8 +65,8 @@ def get_model(model_name, device):
         raise ValueError(f"Unknown model: {model_name}")
     return model.to(device)
 
-def train_loop(net, train_loader, test_loader, args):
-    """Training loop with test-based model selection."""
+def train_loop(net, train_loader, val_loader, args):
+    """Training loop with validation-based model selection."""
     device = args.device
     optimizer = optim.Adam(net.parameters(), lr=args.lr)
     scheduler = lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
@@ -108,11 +108,11 @@ def train_loop(net, train_loader, test_loader, args):
         avg_loss = running_loss / total_batches
         history['loss'].append(avg_loss)
         
-        # Test (Model Selection)
-        acc = evaluate(net, test_loader, args)
+        # Validation (Model Selection)
+        acc = evaluate(net, val_loader, args)
         history['acc'].append(acc)
         
-        print(f"Test Accuracy: {acc:.4f}")
+        print(f"Val Accuracy: {acc:.4f}")
         
         # Save Best Model
         if acc > best_acc:
@@ -161,9 +161,18 @@ def calculate_p_value(acc, baseline=0.33, n=75):
     p_value = 2 * norm.sf(abs(z))
     return p_value
 
-def test_full(net, loader, args):
-    """Full evaluation with metrics, confusion matrix, and t-SNE."""
-    print(f"\n{'='*20} Testing: {args.model} ({args.shot_num}-shot) {'='*20}")
+def test_full(net, loader, args, shot_num=None, query_num=None):
+    """Full evaluation with metrics, confusion matrix, and t-SNE.
+    
+    For final test phase: 150 episodes, 1-shot/1-query per class.
+    Confusion matrix: each row sums to 150 (one prediction per class per episode).
+    t-SNE: visualizes all 150 * way_num query features.
+    """
+    # Use provided shot_num/query_num or fall back to args
+    shot_num = shot_num if shot_num is not None else args.shot_num
+    query_num = query_num if query_num is not None else args.query_num
+    
+    print(f"\n{'='*20} Testing: {args.model} ({shot_num}-shot, {query_num}-query) {'='*20}")
     
     all_preds = []
     all_targets = []
@@ -178,7 +187,7 @@ def test_full(net, loader, args):
     with torch.no_grad():
         for query_imgs, query_targets, support_imgs, support_targets in tqdm(loader, desc="Testing"):
             B, NQ_total, C, H, W = query_imgs.shape
-            s = support_imgs.view(B, args.way_num, args.shot_num, C, H, W).to(device)
+            s = support_imgs.view(B, args.way_num, shot_num, C, H, W).to(device)
             q = query_imgs.to(device)
             targets = query_targets.view(-1).to(device)
             
@@ -221,7 +230,7 @@ def test_full(net, loader, args):
 
     # Display Results
     print("\n" + "="*50)
-    print(f"RESULTS SUMMARY: {args.model} {args.shot_num}-shot")
+    print(f"RESULTS SUMMARY: {args.model} {shot_num}-shot, {query_num}-query")
     print("="*50)
     print(f"Accuracy : {final_acc:.4f}")
     print(f"Precision: {precision:.4f}")
@@ -312,8 +321,30 @@ def main():
         y = torch.from_numpy(y)
         return X, y
         
-    train_X, train_y = prep_data(dataset.X_train, dataset.y_train)
+    train_X_full, train_y_full = prep_data(dataset.X_train, dataset.y_train)
+    val_X, val_y = prep_data(dataset.X_val, dataset.y_val)
     test_X, test_y = prep_data(dataset.X_test, dataset.y_test)
+
+    # If user specified a limited number of training samples, sample evenly per class
+    if args.training_samples is not None:
+        per_class = args.training_samples // args.way_num
+        train_X_list = []
+        train_y_list = []
+        for cls in range(args.way_num):
+            idxs = (train_y_full == cls).nonzero(as_tuple=False).view(-1)
+            if idxs.numel() < per_class:
+                raise ValueError(f"Not enough training samples for class {cls}: required {per_class}, available {idxs.numel()}")
+            # deterministic selection (shuffle with seed)
+            g = torch.Generator()
+            g.manual_seed(args.seed)
+            perm = idxs[torch.randperm(idxs.numel(), generator=g)][:per_class]
+            train_X_list.append(train_X_full[perm])
+            train_y_list.append(train_y_full[perm])
+
+        train_X = torch.cat(train_X_list, dim=0)
+        train_y = torch.cat(train_y_list, dim=0)
+    else:
+        train_X, train_y = train_X_full, train_y_full
     
     # Episode generators
     train_ds = FewshotDataset(train_X, train_y, 
@@ -321,7 +352,15 @@ def main():
                               way_num=args.way_num,
                               shot_num=args.shot_num,
                               query_num=args.query_num) 
+    
+    # Validation uses the reserved eval pool (val_X,val_y)
+    val_ds = FewshotDataset(val_X, val_y,
+                            episode_num=args.episode_num_test,
+                            way_num=args.way_num,
+                            shot_num=args.shot_num,
+                            query_num=args.query_num)
                               
+    # Test dataset used for final evaluation (may be overridden later for 1-shot final test)
     test_ds = FewshotDataset(test_X, test_y,
                              episode_num=args.episode_num_test,
                              way_num=args.way_num,
@@ -329,19 +368,31 @@ def main():
                              query_num=args.query_num)
                              
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
     
     net = get_model(args.model, args.device)
     
     if args.mode == 'train':
-        train_loop(net, train_loader, test_loader, args)
+        # Train with validation-based model selection
+        train_loop(net, train_loader, val_loader, args)
         
-        # Final Test Phase
+        # Final Test Phase: evaluate best model on 150 one-shot episodes
         best_path = os.path.join(args.path_weights, f"{args.model}_{args.shot_num}shot_best.pth")
         if os.path.exists(best_path):
             print(f"Loading best model for final test evaluation: {best_path}")
             net.load_state_dict(torch.load(best_path))
-            test_full(net, test_loader, args)
+            # Create final test episodes: 150 episodes, 1-shot 1-query per class
+            final_test_ds = FewshotDataset(test_X, test_y,
+                                           episode_num=150,
+                                           way_num=args.way_num,
+                                           shot_num=1,
+                                           query_num=1,
+                                           seed=args.seed)
+            final_test_loader = DataLoader(final_test_ds, batch_size=args.batch_size, shuffle=False)
+            # Final test: 150 episodes × way_num queries = 450 total predictions
+            # Confusion matrix rows sum to 150 (one query per class per episode)
+            test_full(net, final_test_loader, args, shot_num=1, query_num=1)
             
     elif args.mode == 'test':
         if args.weights is None:
