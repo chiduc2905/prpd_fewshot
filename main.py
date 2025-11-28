@@ -1,15 +1,14 @@
-"""Training and testing script for PD Scalogram few-shot classification."""
-import torch
-import numpy as np
-import torch.nn as nn
+"""PD Scalogram Few-Shot Learning - Training and Evaluation."""
+import os
 import argparse
+import numpy as np
+import torch
+import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
-import time
-from tqdm import tqdm
-import os
 from torch.utils.data import DataLoader
-from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
+from tqdm import tqdm
+from sklearn.metrics import precision_recall_fscore_support
 
 from dataset import PDScalogram
 from dataloader.dataloader import FewshotDataset
@@ -18,450 +17,330 @@ from net.cosine import CosineNet
 from net.protonet import ProtoNet
 from net.covamnet import CovaMNet
 
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
 def get_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='PD Scalogram Few-shot Learning')
     
-    # Dataset / Paths
-    parser.add_argument('--dataset_path', type=str, default='./scalogram_images/', help='Path to dataset')
-    parser.add_argument('--path_weights', type=str, default='checkpoints/', help='Directory to save checkpoints')
-    parser.add_argument('--path_results', type=str, default='results/', help='Directory to save results')
-    parser.add_argument('--weights', type=str, default=None, help='Path to specific weight file for testing')
+    # Paths
+    parser.add_argument('--dataset_path', type=str, default='./scalogram_images/')
+    parser.add_argument('--path_weights', type=str, default='checkpoints/')
+    parser.add_argument('--path_results', type=str, default='results/')
+    parser.add_argument('--weights', type=str, default=None, help='Checkpoint for testing')
     
     # Model
-    parser.add_argument('--model', type=str, default='covamnet', choices=['cosine', 'protonet', 'covamnet'], help='Model architecture')
-    parser.add_argument('--covamnet_classifier', action='store_true', help='Use learnable classifier in CovaMNet (default: False, use similarity scores only)')
+    parser.add_argument('--model', type=str, default='covamnet', 
+                        choices=['cosine', 'protonet', 'covamnet'])
     
-    # Fewshot settings
-    parser.add_argument('--way_num', type=int, default=3, help='Number of classes per episode')
-    parser.add_argument('--shot_num', type=int, default=1, help='Number of support samples per class')
-    parser.add_argument('--query_num', type=int, default=None, help='Number of query samples per class. Default: 19 for 1-shot, 15 for 5-shot')
+    # Few-shot settings
+    parser.add_argument('--way_num', type=int, default=3)
+    parser.add_argument('--shot_num', type=int, default=1)
+    parser.add_argument('--query_num', type=int, default=15, help='Queries per class (training)')
     
-    # Training settings
-    parser.add_argument('--training_samples', type=int, default=None, help='Total number of training samples across ALL classes (e.g. 30, 60). If None, use all.')
-    parser.add_argument('--episode_num_train', type=int, default=100, help='Number of episodes per epoch (train)')
-    parser.add_argument('--episode_num_test', type=int, default=75, help='Number of episodes per epoch (test)')
-    parser.add_argument('--num_epochs', type=int, default=None, help='Total training epochs. Default: 100 for 1-shot, 50 for 5-shot (use early stopping)')
-    parser.add_argument('--batch_size', type=int, default=1, help='Episodes per batch')
-    parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate (init value)')
-    parser.add_argument('--step_size', type=int, default=10, help='Scheduler step size')
-    parser.add_argument('--gamma', type=float, default=0.1, help='Scheduler gamma')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
+    # Training
+    parser.add_argument('--training_samples', type=int, default=None, 
+                        help='Total training samples (e.g. 30=10/class)')
+    parser.add_argument('--episode_num_train', type=int, default=100)
+    parser.add_argument('--episode_num_val', type=int, default=75)
+    parser.add_argument('--num_epochs', type=int, default=None)
+    parser.add_argument('--batch_size', type=int, default=1)
+    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--step_size', type=int, default=10)
+    parser.add_argument('--gamma', type=float, default=0.1)
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--device', type=str, 
+                        default='cuda' if torch.cuda.is_available() else 'cpu')
     
     # Mode
-    parser.add_argument('--mode', type=str, default='train', choices=['train', 'test'], help='Execution mode')
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'test'])
     
     return parser.parse_args()
 
-def get_classifier_suffix(args):
-    """Get classifier suffix for filenames when using CovaMNet."""
-    if args.model == 'covamnet':
-        return "_classifier" if args.covamnet_classifier else "_similarity"
-    return ""
 
-def get_model(model_name, device, use_classifier=None):
+def get_model(name, device):
     """Initialize model by name."""
-    if model_name == 'cosine':
-        model = CosineNet(use_gpu=(device=='cuda'))
-    elif model_name == 'protonet':
-        model = ProtoNet(use_gpu=(device=='cuda'))
-    elif model_name == 'covamnet':
-        model = CovaMNet(use_classifier=use_classifier, use_gpu=(device=='cuda'))
-    else:
-        raise ValueError(f"Unknown model: {model_name}")
+    models = {
+        'cosine': CosineNet,
+        'protonet': ProtoNet,
+        'covamnet': CovaMNet,
+    }
+    model = models[name](use_gpu=(device == 'cuda'))
     return model.to(device)
 
+
+# =============================================================================
+# Training
+# =============================================================================
+
 def train_loop(net, train_loader, val_loader, args):
-    """Training loop with validation-based model selection."""
-    device = args.device
+    """Train with validation-based model selection."""
     optimizer = optim.Adam(net.parameters(), lr=args.lr)
     scheduler = lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
-    loss_fn = ContrastiveLoss().to(device)
+    loss_fn = ContrastiveLoss().to(args.device)
     
     best_acc = 0.0
-    history = {'loss': [], 'acc': []}
-    
-    print(f"Starting training for {args.num_epochs} epochs...")
     
     for epoch in range(1, args.num_epochs + 1):
+        # Train
         net.train()
-        running_loss = 0.0
-        total_batches = 0
+        total_loss = 0.0
         
-        # Training
-        with tqdm(train_loader, desc=f'Epoch {epoch}/{args.num_epochs}', unit='batch') as t:
-            for query_imgs, query_targets, support_imgs, support_targets in t:
-                B, NQ_total, C, H, W = query_imgs.shape
-                _, NS_total, _, _, _ = support_imgs.shape
-                
-                s = support_imgs.view(B, args.way_num, args.shot_num, C, H, W).to(device)
-                q = query_imgs.to(device)
-                targets = query_targets.view(-1).to(device) 
-                
-                optimizer.zero_grad()
-                
-                scores = net(q, s)
-                loss = loss_fn(scores, targets)
-                loss.backward()
-                optimizer.step()
-                
-                running_loss += loss.item()
-                total_batches += 1
-                
-                t.set_postfix(loss=running_loss/total_batches)
+        pbar = tqdm(train_loader, desc=f'Epoch {epoch}/{args.num_epochs}')
+        for query, q_labels, support, s_labels in pbar:
+            B = query.shape[0]
+            C, H, W = query.shape[2], query.shape[3], query.shape[4]
+            
+            support = support.view(B, args.way_num, args.shot_num, C, H, W).to(args.device)
+            query = query.to(args.device)
+            targets = q_labels.view(-1).to(args.device)
+            
+            optimizer.zero_grad()
+            scores = net(query, support)
+            loss = loss_fn(scores, targets)
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            pbar.set_postfix(loss=f'{loss.item():.4f}')
         
         scheduler.step()
-        avg_loss = running_loss / total_batches
-        history['loss'].append(avg_loss)
         
-        # Validation (Model Selection)
+        # Validate
         acc = evaluate(net, val_loader, args)
-        history['acc'].append(acc)
+        print(f'Epoch {epoch}: Loss={total_loss/len(train_loader):.4f}, Val Acc={acc:.4f}')
         
-        print(f"Val Accuracy: {acc:.4f}")
-        
-        # Save Best Model
+        # Save best
         if acc > best_acc:
             best_acc = acc
-            classifier_suffix = get_classifier_suffix(args)
-            save_name = f"{args.model}_{args.shot_num}shot{classifier_suffix}_best.pth"
-            save_path = os.path.join(args.path_weights, save_name)
-            torch.save(net.state_dict(), save_path)
-            print(f"New best model saved to {save_path}")
-            
-    return history
+            path = os.path.join(args.path_weights, f'{args.model}_{args.shot_num}shot_best.pth')
+            torch.save(net.state_dict(), path)
+            print(f'  → Best model saved ({acc:.4f})')
+    
+    return best_acc
+
 
 def evaluate(net, loader, args):
-    """Evaluate model accuracy on loader."""
+    """Compute accuracy on loader."""
     net.eval()
-    total_correct = 0
-    total_samples = 0
-    device = args.device
+    correct, total = 0, 0
     
     with torch.no_grad():
-        for query_imgs, query_targets, support_imgs, support_targets in loader:
-            B, NQ_total, C, H, W = query_imgs.shape
+        for query, q_labels, support, s_labels in loader:
+            B = query.shape[0]
+            C, H, W = query.shape[2], query.shape[3], query.shape[4]
             
-            s = support_imgs.view(B, args.way_num, args.shot_num, C, H, W).to(device)
-            q = query_imgs.to(device)
-            targets = query_targets.view(-1).to(device)
+            # Infer shot_num from support shape
+            shot_num = support.shape[1] // args.way_num
             
-            scores = net(q, s)
-            preds = torch.argmax(scores, dim=1)
+            support = support.view(B, args.way_num, shot_num, C, H, W).to(args.device)
+            query = query.to(args.device)
+            targets = q_labels.view(-1).to(args.device)
             
-            total_correct += (preds == targets).sum().item()
-            total_samples += targets.size(0)
+            scores = net(query, support)
+            preds = scores.argmax(dim=1)
             
-    return total_correct / total_samples if total_samples > 0 else 0
+            correct += (preds == targets).sum().item()
+            total += targets.size(0)
+    
+    return correct / total if total > 0 else 0
 
-def calculate_p_value(acc, baseline=0.33, n=75):
-    """Calculate p-value using z-test for proportions."""
+
+# =============================================================================
+# Testing
+# =============================================================================
+
+def calculate_p_value(acc, baseline, n):
+    """Z-test for proportion significance."""
+    from scipy.stats import norm
     if n <= 0:
         return 1.0
-    p = acc
-    p0 = baseline
-    z = (p - p0) / np.sqrt(p0 * (1 - p0) / n)
-    
-    # Two-tailed p-value from z-score
-    from scipy.stats import norm
-    # Use survival function (sf = 1 - cdf) for better precision with small p-values
-    p_value = 2 * norm.sf(abs(z))
-    return p_value
+    z = (acc - baseline) / np.sqrt(baseline * (1 - baseline) / n)
+    return 2 * norm.sf(abs(z))
 
-def test_full(net, loader, args, shot_num=None, query_num=None, generate_plots=True):
-    """Full evaluation with metrics, confusion matrix, and t-SNE.
 
-    Args:
-        generate_plots: Whether to generate confusion matrix and t-SNE plots.
-                        Only True for final test phase (150 episodes, 1-query).
-
-    For final test phase: 150 episodes, 1-shot/1-query per class.
-    Confusion matrix: each row sums to 150 (one prediction per class per episode).
-    t-SNE: visualizes all 150 * way_num query features.
+def test_final(net, loader, args):
     """
-    # Use provided shot_num/query_num or fall back to args
-    shot_num = shot_num if shot_num is not None else args.shot_num
-    query_num = query_num if query_num is not None else args.query_num
+    Final evaluation: 150 episodes, 1-shot 1-query.
     
-    print(f"\n{'='*20} Testing: {args.model} ({shot_num}-shot, {query_num}-query) {'='*20}")
-
-    # Calculate expected samples for debugging
-    if hasattr(args, 'episode_num_test'):
-        expected_episodes = args.episode_num_test
-    else:
-        # For final test, use 150 episodes
-        expected_episodes = 150
-
-    expected_total = expected_episodes * args.way_num * query_num
-    print(f"Expected: {expected_episodes} episodes × {args.way_num} classes × {query_num} queries = {expected_total} samples")
-
-    all_preds = []
-    all_targets = []
-    all_features = []
+    Metrics: Accuracy, Precision, Recall, F1, p-value
+    Plots: Confusion Matrix (rows sum to 150), t-SNE
+    """
+    print(f"\n{'='*50}")
+    print(f"Final Test: {args.model} | {args.shot_num}-shot training")
+    print(f"150 episodes × {args.way_num} classes × 1 query = 450 predictions")
+    print('='*50)
     
-    device = args.device
     net.eval()
+    all_preds, all_targets, all_features = [], [], []
     
-    total_correct = 0
-    total_samples = 0
-
     with torch.no_grad():
-        for query_imgs, query_targets, support_imgs, support_targets in tqdm(loader, desc="Testing"):
-            B, NQ_total, C, H, W = query_imgs.shape
-            s = support_imgs.view(B, args.way_num, shot_num, C, H, W).to(device)
-            q = query_imgs.to(device)
-            targets = query_targets.view(-1).to(device)
+        for query, q_labels, support, s_labels in tqdm(loader, desc='Testing'):
+            B, NQ, C, H, W = query.shape
             
-            scores = net(q, s)
-            preds = torch.argmax(scores, dim=1)
+            # Final test always uses 1-shot
+            support = support.view(B, args.way_num, 1, C, H, W).to(args.device)
+            query = query.to(args.device)
+            targets = q_labels.view(-1).to(args.device)
             
-            total_correct += (preds == targets).sum().item()
-            total_samples += targets.size(0)
+            scores = net(query, support)
+            preds = scores.argmax(dim=1)
             
             all_preds.extend(preds.cpu().numpy())
             all_targets.extend(targets.cpu().numpy())
             
-            # Extract Features
-            q_flat = q.view(-1, C, H, W)
+            # Extract features for t-SNE
+            q_flat = query.view(-1, C, H, W)
             if hasattr(net, 'encoder'):
                 feat = net.encoder(q_flat)
-            elif hasattr(net, 'features'):
-                feat = net.features(q_flat)
-            else:
-                feat = None
-            
-            if feat is not None:
-                 if feat.dim() > 2:
-                     feat = nn.functional.adaptive_avg_pool2d(feat, (1, 1))
-                     feat = feat.view(feat.size(0), -1)
-                 all_features.append(feat.cpu().numpy())
-                 
-    final_acc = total_correct / total_samples
+                feat = nn.functional.adaptive_avg_pool2d(feat, 1).view(feat.size(0), -1)
+                all_features.append(feat.cpu().numpy())
     
-    # Debug: Print actual sample counts
-    print(f"Actual results: {len(all_targets)} total samples, {len(set(all_targets))} unique classes")
-    cm = confusion_matrix(all_targets, all_preds)
-    print(f"Confusion matrix shape: {cm.shape}, sum per class: {cm.sum(axis=1)}")
-
-    # Calculate Metrics: Precision, Recall, F1
-    precision, recall, f1, support = precision_recall_fscore_support(all_targets, all_preds, average='macro')
-
-    # Calculate p-value (approximate, assuming random chance baseline = 1/num_classes)
-    try:
-        from scipy.stats import norm
-        p_value = calculate_p_value(final_acc, baseline=1.0/args.way_num, n=total_samples)
-    except ImportError:
-        p_value = 0.0
-        print("Warning: scipy not installed, p-value set to 0.0")
-
-    # Display Results
-    print("\n" + "="*50)
-    print(f"RESULTS SUMMARY: {args.model} {shot_num}-shot, {query_num}-query")
-    print("="*50)
-    print(f"Accuracy : {final_acc:.4f}")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall   : {recall:.4f}")
+    # Metrics
+    all_preds = np.array(all_preds)
+    all_targets = np.array(all_targets)
+    
+    acc = (all_preds == all_targets).mean()
+    prec, rec, f1, _ = precision_recall_fscore_support(all_targets, all_preds, average='macro')
+    p_val = calculate_p_value(acc, 1.0/args.way_num, len(all_targets))
+    
+    print(f"\nAccuracy : {acc:.4f}")
+    print(f"Precision: {prec:.4f}")
+    print(f"Recall   : {rec:.4f}")
     print(f"F1-Score : {f1:.4f}")
-    print(f"p-value  : {p_value:.4e}")
-    print("="*50 + "\n")
+    print(f"p-value  : {p_val:.2e}")
     
-    # Save Results to File
-    res_dir = args.path_results
-    if not os.path.exists(res_dir):
-        os.makedirs(res_dir)
-        
-    training_samples_str = f"_{args.training_samples}samples" if args.training_samples is not None else "_allsamples"
-    classifier_suffix = get_classifier_suffix(args)
-    res_file = os.path.join(res_dir, f"results_{args.model}_{args.shot_num}shot{classifier_suffix}{training_samples_str}.txt")
+    # Save results
+    samples_str = f"_{args.training_samples}samples" if args.training_samples else "_allsamples"
     
-    # Save individual result
-    with open(res_file, 'w') as f:
+    result_file = os.path.join(args.path_results, 
+                               f"results_{args.model}_{args.shot_num}shot{samples_str}.txt")
+    with open(result_file, 'w') as f:
         f.write(f"Model: {args.model}\n")
         f.write(f"Shot: {args.shot_num}\n")
         f.write(f"Training Samples: {args.training_samples}\n")
-        f.write(f"Accuracy: {final_acc:.4f}\n")
-        f.write(f"Precision: {precision:.4f}\n")
-        f.write(f"Recall: {recall:.4f}\n")
+        f.write(f"Accuracy: {acc:.4f}\n")
+        f.write(f"Precision: {prec:.4f}\n")
+        f.write(f"Recall: {rec:.4f}\n")
         f.write(f"F1-Score: {f1:.4f}\n")
-        f.write(f"p-value: {p_value:.4e}\n")
-    print(f"Results saved to {res_file}")
-
-    # Append to summary file for this sample size
-    summary_file = os.path.join(res_dir, f"summary{training_samples_str}.txt")
+        f.write(f"p-value: {p_val:.2e}\n")
+    
+    # Append to summary
+    summary_file = os.path.join(args.path_results, f"summary{samples_str}.txt")
+    write_header = not os.path.exists(summary_file) or os.path.getsize(summary_file) == 0
     with open(summary_file, 'a') as f:
-        # Check if file is empty to write header
-        if os.stat(summary_file).st_size == 0:
+        if write_header:
             f.write("Model\tShot\tAccuracy\tPrecision\tRecall\tF1\tp-value\n")
-        f.write(f"{args.model}\t{args.shot_num}\t{final_acc:.4f}\t{precision:.4f}\t{recall:.4f}\t{f1:.4f}\t{p_value:.4e}\n")
-    print(f"Summary appended to {summary_file}")
+        f.write(f"{args.model}\t{args.shot_num}\t{acc:.4f}\t{prec:.4f}\t{rec:.4f}\t{f1:.4f}\t{p_val:.2e}\n")
+    
+    # Plots
+    cm_path = os.path.join(args.path_results, 
+                           f"confusion_matrix_{args.model}_{args.shot_num}shot{samples_str}.png")
+    plot_confusion_matrix(all_targets, all_preds, args.way_num, cm_path)
+    
+    if all_features:
+        features = np.vstack(all_features)
+        tsne_path = os.path.join(args.path_results, 
+                                 f"tsne_{args.model}_{args.shot_num}shot{samples_str}.png")
+        plot_tsne(features, all_targets, args.way_num, tsne_path)
+    
+    print(f"\nResults saved to {args.path_results}")
 
 
-    # Plotting (only for final test phase with 150 episodes)
-    if generate_plots:
-        # Confusion Matrix
-        classifier_suffix = get_classifier_suffix(args)
-        save_path_cm = os.path.join(res_dir, f"confusion_matrix_{args.model}_{args.shot_num}shot{classifier_suffix}{training_samples_str}.png")
-        try:
-            plot_confusion_matrix(all_targets, all_preds, num_classes=args.way_num, save_path=save_path_cm)
-        except Exception as e:
-            print(f"Skipping confusion matrix: {e}")
-
-        # t-SNE
-        if all_features:
-            all_features = np.vstack(all_features)
-            all_targets_arr = np.array(all_targets)
-            save_path_tsne = os.path.join(res_dir, f"tsne_{args.model}_{args.shot_num}shot{classifier_suffix}{training_samples_str}.png")
-            try:
-                # Use only a subset if points > 2000 for speed, or full set for accuracy
-                plot_tsne(all_features, all_targets_arr, num_classes=args.way_num, save_path=save_path_tsne)
-            except Exception as e:
-                print(f"Skipping t-SNE: {e}")
-        else:
-            print("No features extracted for t-SNE")
-    else:
-        print("Skipping plots (not final test phase)")
-
-
+# =============================================================================
+# Main
+# =============================================================================
 
 def main():
-    """Main entry point."""
     args = get_args()
     
     # Set defaults based on shot_num
-    if args.query_num is None:
-        args.query_num = 15  # 15 queries per class for both 1-shot and 5-shot
-        print(f"query_num={args.query_num} for {args.shot_num}-shot")
-    
     if args.num_epochs is None:
         args.num_epochs = 100 if args.shot_num == 1 else 70
-        print(f"num_epochs={args.num_epochs} for {args.shot_num}-shot")
     
-    print(f"Configuration: {args}")
+    print(f"Config: {args.model} | {args.shot_num}-shot | {args.num_epochs} epochs")
     
     seed_func(args.seed)
-    if not os.path.exists(args.path_weights):
-        os.makedirs(args.path_weights)
-    if not os.path.exists(args.path_results):
-        os.makedirs(args.path_results)
-        
-    print("Loading dataset...")
-    dataset = PDScalogram(args.dataset_path, total_training_samples=args.training_samples)
+    os.makedirs(args.path_weights, exist_ok=True)
+    os.makedirs(args.path_results, exist_ok=True)
     
-    def prep_data(X, y):
+    # Load dataset
+    dataset = PDScalogram(args.dataset_path)
+    
+    def to_tensor(X, y):
         X = torch.from_numpy(X.astype(np.float32))
-        if X.dim() == 4 and X.shape[3] == 3: 
-             X = X.permute(0, 3, 1, 2)
-        y = torch.from_numpy(y)
+        y = torch.from_numpy(y).long()
         return X, y
-        
-    train_X_full, train_y_full = prep_data(dataset.X_train, dataset.y_train)
-    val_X, val_y = prep_data(dataset.X_val, dataset.y_val)
-    test_X, test_y = prep_data(dataset.X_test, dataset.y_test)
-
-    # If user specified a limited number of training samples, sample evenly per class
-    if args.training_samples is not None:
+    
+    train_X, train_y = to_tensor(dataset.X_train, dataset.y_train)
+    val_X, val_y = to_tensor(dataset.X_val, dataset.y_val)
+    test_X, test_y = to_tensor(dataset.X_test, dataset.y_test)
+    
+    # Limit training samples if specified
+    if args.training_samples:
         per_class = args.training_samples // args.way_num
-        train_X_list = []
-        train_y_list = []
-        for cls in range(args.way_num):
-            idxs = (train_y_full == cls).nonzero(as_tuple=False).view(-1)
-            if idxs.numel() < per_class:
-                raise ValueError(f"Not enough training samples for class {cls}: required {per_class}, available {idxs.numel()}")
-            # deterministic selection (shuffle with seed)
-            g = torch.Generator()
-            g.manual_seed(args.seed)
-            perm = idxs[torch.randperm(idxs.numel(), generator=g)][:per_class]
-            train_X_list.append(train_X_full[perm])
-            train_y_list.append(train_y_full[perm])
-
-        train_X = torch.cat(train_X_list, dim=0)
-        train_y = torch.cat(train_y_list, dim=0)
-    else:
-        train_X, train_y = train_X_full, train_y_full
+        X_list, y_list = [], []
+        
+        for c in range(args.way_num):
+            idx = (train_y == c).nonzero(as_tuple=True)[0]
+            if len(idx) < per_class:
+                raise ValueError(f"Class {c}: need {per_class}, have {len(idx)}")
+            
+            g = torch.Generator().manual_seed(args.seed)
+            perm = torch.randperm(len(idx), generator=g)[:per_class]
+            X_list.append(train_X[idx[perm]])
+            y_list.append(train_y[idx[perm]])
+        
+        train_X = torch.cat(X_list)
+        train_y = torch.cat(y_list)
+        print(f"Using {args.training_samples} training samples ({per_class}/class)")
     
-    # Episode generators
-    train_ds = FewshotDataset(train_X, train_y, 
-                              episode_num=args.episode_num_train,
-                              way_num=args.way_num,
-                              shot_num=args.shot_num,
-                              query_num=args.query_num) 
+    # Create data loaders
+    train_ds = FewshotDataset(train_X, train_y, args.episode_num_train,
+                              args.way_num, args.shot_num, args.query_num, args.seed)
     
-    # Validation uses the reserved eval pool (val_X,val_y)
-    val_ds = FewshotDataset(val_X, val_y,
-                            episode_num=args.episode_num_test,
-                            way_num=args.way_num,
-                            shot_num=args.shot_num,
-                            query_num=args.query_num)
-                              
-    # Test dataset used for final evaluation (may be overridden later for 1-shot final test)
-    test_ds = FewshotDataset(test_X, test_y,
-                             episode_num=args.episode_num_test,
-                             way_num=args.way_num,
-                             shot_num=args.shot_num,
-                             query_num=args.query_num)
-                             
+    # Validation: 1 query per class (same as final test)
+    val_ds = FewshotDataset(val_X, val_y, args.episode_num_val,
+                            args.way_num, args.shot_num, 1, args.seed)
+    
+    # Final test: 150 episodes, 1-shot, 1-query
+    test_ds = FewshotDataset(test_X, test_y, 150,
+                             args.way_num, 1, 1, args.seed)
+    
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
-    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size)
+    test_loader = DataLoader(test_ds, batch_size=args.batch_size)
     
-    net = get_model(args.model, args.device, use_classifier=args.covamnet_classifier if args.model == 'covamnet' else None)
+    # Model
+    net = get_model(args.model, args.device)
     
     if args.mode == 'train':
-        # Train with validation-based model selection
         train_loop(net, train_loader, val_loader, args)
         
-        # Final Test Phase: evaluate best model on 150 one-shot episodes
-        classifier_suffix = get_classifier_suffix(args)
-        # Try new naming scheme first
-        best_path = os.path.join(args.path_weights, f"{args.model}_{args.shot_num}shot{classifier_suffix}_best.pth")
-        if not os.path.exists(best_path):
-            # Fallback to old naming scheme for backward compatibility
-            best_path = os.path.join(args.path_weights, f"{args.model}_{args.shot_num}shot_best.pth")
+        # Load best and run final test
+        best_path = os.path.join(args.path_weights, f'{args.model}_{args.shot_num}shot_best.pth')
         if os.path.exists(best_path):
-            print(f"Loading best model for final test evaluation: {best_path}")
-            state_dict = torch.load(best_path)
-            # Use strict=False to handle classifier mode mismatches
-            net.load_state_dict(state_dict, strict=False)
-            print("Weights loaded successfully")
-            # Create final test episodes: 150 episodes, 1-shot 1-query per class
-            print(f"Creating final test with: episode_num=150, way_num={args.way_num}, shot_num=1, query_num=1")
-            final_test_ds = FewshotDataset(test_X, test_y,
-                                           episode_num=150,
-                                           way_num=args.way_num,
-                                           shot_num=1,
-                                           query_num=1,
-                                           seed=args.seed)
-            final_test_loader = DataLoader(final_test_ds, batch_size=args.batch_size, shuffle=False)
-            # Final test: 150 episodes × way_num queries = 450 total predictions
-            # Confusion matrix rows sum to 150 (one query per class per episode)
-            print(f"Final test dataset length: {len(final_test_ds)}")
-            test_full(net, final_test_loader, args, shot_num=1, query_num=1, generate_plots=True)
-            
+            net.load_state_dict(torch.load(best_path))
+            test_final(net, test_loader, args)
+    
     elif args.mode == 'test':
-        if args.weights is None:
-            classifier_suffix = get_classifier_suffix(args)
-            # Try new naming scheme first
-            best_path = os.path.join(args.path_weights, f"{args.model}_{args.shot_num}shot{classifier_suffix}_best.pth")
-            if os.path.exists(best_path):
-                args.weights = best_path
-            else:
-                # Fallback to old naming scheme for backward compatibility
-                old_path = os.path.join(args.path_weights, f"{args.model}_{args.shot_num}shot_best.pth")
-                if os.path.exists(old_path):
-                    args.weights = old_path
-                    print(f"Using legacy checkpoint: {old_path}")
-                else:
-                    print("Warning: No weights provided. Testing with random init.")
-        
+        # Load weights
         if args.weights:
-            print(f"Loading weights: {args.weights}")
-            state_dict = torch.load(args.weights)
-            # Use strict=False to handle classifier mode mismatches
-            net.load_state_dict(state_dict, strict=False)
-            print("Weights loaded successfully")
-            
-        test_full(net, test_loader, args, generate_plots=False)
+            path = args.weights
+        else:
+            path = os.path.join(args.path_weights, f'{args.model}_{args.shot_num}shot_best.pth')
+        
+        if os.path.exists(path):
+            net.load_state_dict(torch.load(path))
+            print(f"Loaded: {path}")
+        else:
+            print(f"Warning: {path} not found, using random init")
+        
+        test_final(net, test_loader, args)
+
 
 if __name__ == '__main__':
     main()

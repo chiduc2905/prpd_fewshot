@@ -1,60 +1,61 @@
 # Project Structure
 
-## Architecture Overview
+## Architecture
 
 ```
-Input (3×64×64) → Conv64F_Encoder → Features (64×16×16) → Model Head → Scores
+Input (3×64×64) → Conv64F_Encoder (64×16×16) → Model Head → Scores (way_num)
 ```
-
-### Encoder: Conv64F_Encoder
-4-layer CNN with 2 max-pooling layers. Output: 64×16×16 feature maps.
 
 ### Models
+
 | Model | Head | Metric |
 |-------|------|--------|
-| CosineNet | AvgPool → FC(64) | Cosine similarity |
-| ProtoNet | AvgPool | Negative Euclidean distance |
-| CovaMNet | CovaBlock → Conv1d | Covariance-based similarity |
+| CosineNet | AvgPool → FC | Cosine similarity |
+| ProtoNet | AvgPool | Negative Euclidean |
+| CovaMNet | CovaBlock | Covariance-based |
 
-## File Structure
+## Files
 
 ```
-├── main.py              # Training & testing entry point
-├── dataset.py           # PDScalogram loader (64×64, auto-norm)
+├── main.py              # Training & evaluation
+├── dataset.py           # Data loading (64×64, auto-norm)
 ├── dataloader/
-│   └── dataloader.py    # FewshotDataset (episodic sampling)
+│   └── dataloader.py    # Episode generator
 ├── net/
-│   ├── encoder.py       # Conv64F_Encoder backbone
-│   ├── cosine.py        # CosineNet
-│   ├── protonet.py      # ProtoNet
-│   ├── covamnet.py      # CovaMNet
-│   ├── cova_block.py    # Covariance block
-│   └── utils.py         # Weight initialization
+│   ├── encoder.py       # Conv64F backbone
+│   ├── cosine.py        
+│   ├── protonet.py      
+│   └── covamnet.py      
 ├── function/
-│   └── function.py      # Loss, metrics, visualization
+│   └── function.py      # Loss & visualization
 ├── checkpoints/         # Model weights
-└── results/             # Metrics, plots
+└── results/             # Metrics & plots
 ```
 
-## Training Commands
+## Data Flow
 
-```bash
-# CovaMNet 1-shot
-python main.py --model covamnet --shot_num 1 --mode train
-
-# ProtoNet 5-shot
-python main.py --model protonet --shot_num 5 --mode train
-
-# CosineNet with limited samples
-python main.py --model cosine --training_samples 60 --mode train
+### Training
+```
+Train Data → FewshotDataset → Episodes (K-shot, 15-query) → Model → Loss
 ```
 
-## Testing Commands
+### Validation (Model Selection)
+```
+Val Data → 75 episodes × 1-query/class → Accuracy → Save Best
+```
+
+### Final Test
+```
+Test Data → 150 episodes × 1-shot × 1-query → Metrics + Plots
+```
+
+## Commands
 
 ```bash
-# Auto-load best checkpoint
-python main.py --model covamnet --shot_num 1 --mode test
-
-# Custom weights
-python main.py --model covamnet --weights path/to/model.pth --mode test
+# All models with 30 samples
+for model in covamnet protonet cosine; do
+    for shot in 1 5; do
+        python main.py --model $model --shot_num $shot --training_samples 30
+    done
+done
 ```

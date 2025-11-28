@@ -1,33 +1,26 @@
 # PD Scalogram Few-Shot Learning
 
-Few-shot learning for Partial Discharge classification using scalogram images.
+Few-shot classification of Partial Discharge patterns using scalogram images.
 
 ## Models
-- **CovaMNet**: Covariance Metric Network
-- **ProtoNet**: Prototypical Network  
-- **CosineNet**: Cosine Similarity Network
 
-## Project Structure
-```
-main.py          # Entry point
-dataset.py       # Data loading (64x64, auto-normalized)
-dataloader/      # Episodic sampling
-net/             # Model architectures
-function/        # Loss & utilities
-checkpoints/     # Saved weights
-results/         # Metrics & plots
-```
-
-## Installation
-```bash
-pip install -r requirements.txt
-```
+| Model | Description |
+|-------|-------------|
+| **CovaMNet** | Covariance Metric Network |
+| **ProtoNet** | Prototypical Network |
+| **CosineNet** | Cosine Similarity Network |
 
 ## Quick Start
 
 ```bash
-# Train
+# Install
+pip install -r requirements.txt
+
+# Train (1-shot)
 python main.py --model covamnet --shot_num 1 --mode train
+
+# Train with limited samples
+python main.py --model protonet --shot_num 5 --training_samples 60 --mode train
 
 # Test
 python main.py --model covamnet --shot_num 1 --mode test
@@ -37,17 +30,44 @@ python main.py --model covamnet --shot_num 1 --mode test
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--model` | covamnet | cosine, protonet, covamnet |
+| `--model` | covamnet | Model: cosine, protonet, covamnet |
 | `--way_num` | 3 | Classes per episode |
 | `--shot_num` | 1 | Support samples per class |
-| `--query_num` | 19/15 | Query samples (1-shot/5-shot) |
-| `--episode_num_train` | 100 | Episodes per epoch |
-| `--episode_num_test` | 75 | Test episodes |
+| `--query_num` | 15 | Query samples per class (training) |
+| `--training_samples` | all | Total training samples (e.g., 30=10/class) |
+| `--num_epochs` | 100/70 | Training epochs (1-shot/5-shot) |
 | `--lr` | 1e-3 | Learning rate |
-| `--gamma` | 0.1 | LR decay factor |
+
+## Evaluation Protocol
+
+### Training Phase
+- Episodes: 100/epoch
+- Support: K-shot per class
+- Query: 15 per class
+- Validation: 75 episodes, 1 query/class
+
+### Final Test Phase
+- **150 episodes**
+- **1-shot, 1-query per class**
+- Total predictions: 450 (150 × 3 classes)
+- Confusion matrix: each row sums to 150
 
 ## Dataset
-- **Input**: 64×64 RGB images
-- **Split**: 70% train / 30% test
+
+```
+scalogram_images/
+├── corona/    # Class 0
+├── no_pd/     # Class 1  
+└── surface/   # Class 2
+```
+
+- **Input**: 64×64 RGB
+- **Split**: 75/class for val/test, rest for train
 - **Normalization**: Auto-computed from dataset
-- **Classes**: corona, no_pd, surface
+
+## Results
+
+Results saved to `results/`:
+- `summary_*.txt` - Metrics table
+- `confusion_matrix_*.png` - Confusion matrix
+- `tsne_*.png` - t-SNE visualization

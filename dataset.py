@@ -1,162 +1,125 @@
 """PD Scalogram Dataset Loader.
 
-Input: 64x64 RGB images, auto-normalized from dataset statistics.
-Split: Train (fixed by --training_samples) / Val (50% remaining) / Test (50% remaining).
+- Input: 64×64 RGB images
+- Normalization: Auto-computed from dataset
+- Split: 75 samples/class for val/test, remainder for training
 """
 import os
+import random
 import numpy as np
 from PIL import Image
-from sklearn.utils import shuffle
-import random
 import torchvision.transforms as transforms
 
-class_idx = {'corona': 0, 'no_pd': 1, 'surface': 2}
+
+CLASS_MAP = {'corona': 0, 'no_pd': 1, 'surface': 2}
 
 
 class PDScalogram:
     """Dataset loader with auto-computed normalization."""
     
-    def __init__(self, data_path, total_training_samples=None):
+    def __init__(self, data_path, eval_per_class=75):
         """
         Args:
-            data_path: Path to dataset directory.
-            total_training_samples: Fixed total training samples (distributed evenly across classes).
-                                    Remaining samples split 50/50 for val/test.
+            data_path: Path to dataset directory
+            eval_per_class: Samples reserved for val/test per class (default: 75)
         """
-        self.data_path = data_path
-        self.total_training_samples = total_training_samples
+        self.data_path = os.path.abspath(data_path)
+        self.eval_per_class = eval_per_class
+        self.classes = sorted(CLASS_MAP.keys(), key=lambda c: CLASS_MAP[c])
         
-        # Normalize path: handle relative and absolute paths
-        if not os.path.isabs(data_path):
-            self.data_path = os.path.abspath(data_path)
+        # Placeholders
+        self.X_train, self.y_train = [], []
+        self.X_val, self.y_val = [], []
+        self.X_test, self.y_test = [], []
+        self.mean, self.std = None, None
         
-        self.classes = sorted(list(class_idx.keys()), key=lambda c: class_idx[c])
-        self.nclasses = len(self.classes)
-        
-        self.X_train = []
-        self.y_train = []
-        self.X_val = []
-        self.y_val = []
-        self.X_test = []
-        self.y_test = []
-        
-        # Initial transform (without normalization) to compute mean/std
-        self.resize_transform = transforms.Compose([
+        # Base transform (no normalization yet)
+        self._base_transform = transforms.Compose([
             transforms.Resize((64, 64)),
             transforms.ToTensor(),
         ])
         
-        # Will be set after computing dataset statistics
-        self.transform = None
-        self.mean = None
-        self.std = None
-
-        print(f'Using dataset path: {self.data_path}')
-        self._compute_mean_std()
+        print(f'Dataset: {self.data_path}')
+        self._compute_stats()
         self._load_data()
-        self._shuffle()
+        self._shuffle_all()
     
-    def _compute_mean_std(self):
-        """Compute per-channel mean and std from dataset."""
-        print("Computing dataset mean and std...")
-        all_pixels = []
+    def _compute_stats(self):
+        """Compute per-channel mean and std."""
+        print('Computing mean/std...')
+        pixels = []
         
-        for class_name in class_idx.keys():
+        for class_name in CLASS_MAP:
             class_path = os.path.join(self.data_path, class_name)
             if not os.path.exists(class_path):
                 continue
             
-            files = [f for f in os.listdir(class_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-            
-            for fname in files:
-                fpath = os.path.join(class_path, fname)
-                img = Image.open(fpath).convert('RGB')
-                img_tensor = self.resize_transform(img)  # (3, H, W)
-                all_pixels.append(img_tensor)
+            for fname in os.listdir(class_path):
+                if not fname.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    continue
+                img = Image.open(os.path.join(class_path, fname)).convert('RGB')
+                pixels.append(self._base_transform(img).numpy())
         
-        # Stack all images: (N, 3, H, W)
-        all_images = np.stack([t.numpy() for t in all_pixels], axis=0)
+        all_imgs = np.stack(pixels)  # (N, 3, H, W)
+        self.mean = all_imgs.mean(axis=(0, 2, 3)).tolist()
+        self.std = all_imgs.std(axis=(0, 2, 3)).tolist()
         
-        # Compute mean and std per channel
-        self.mean = all_images.mean(axis=(0, 2, 3)).tolist()  # [mean_R, mean_G, mean_B]
-        self.std = all_images.std(axis=(0, 2, 3)).tolist()    # [std_R, std_G, std_B]
+        print(f'  Mean: {[f"{m:.3f}" for m in self.mean]}')
+        print(f'  Std:  {[f"{s:.3f}" for s in self.std]}')
         
-        print(f"Dataset mean: {self.mean}")
-        print(f"Dataset std: {self.std}")
-        
-        # Define final transform with computed normalization
+        # Final transform with normalization
         self.transform = transforms.Compose([
             transforms.Resize((64, 64)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=self.mean, std=self.std)
+            transforms.Normalize(self.mean, self.std),
         ])
-        
+    
     def _load_data(self):
-        """Load and split data: Train (fixed) / Val (50% remain) / Test (50% remain)."""
+        """Load and split data into train/val/test."""
+        # Find min class size
+        class_sizes = {}
+        for class_name in CLASS_MAP:
+            path = os.path.join(self.data_path, class_name)
+            if os.path.exists(path):
+                files = [f for f in os.listdir(path) 
+                        if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                class_sizes[class_name] = len(files)
         
-        # First pass: find min class size for balancing
-        class_file_counts = {}
-        for class_name in class_idx.keys():
-            class_path = os.path.join(self.data_path, class_name)
-            if os.path.exists(class_path):
-                files = [f for f in os.listdir(class_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-                class_file_counts[class_name] = len(files)
+        min_size = min(class_sizes.values())
+        eval_size = min(self.eval_per_class, min_size)
         
-        min_class_size = min(class_file_counts.values())
-        print(f"Balancing dataset: using {min_class_size} samples per class (based on min class)")
+        print(f'Split: {eval_size}/class for val/test, rest for train')
         
-        # Reserve a fixed eval pool per class (val & test use the same pool)
-        eval_per_class = min(75, min_class_size)
-        print(f"Reserving {eval_per_class} samples per class for validation/test pool. Remaining samples go to training pool.")
-        
-        for class_name, class_label in class_idx.items():
-            class_path = os.path.join(self.data_path, class_name)
-            if not os.path.exists(class_path):
-                print(f"Warning: Path not found {class_path}")
-                continue
-                
-            files = sorted([f for f in os.listdir(class_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-            
-            if len(files) == 0:
-                print(f"Warning: Class {class_name} has no images.")
+        for class_name, label in CLASS_MAP.items():
+            path = os.path.join(self.data_path, class_name)
+            if not os.path.exists(path):
+                print(f'  Warning: {path} not found')
                 continue
             
-            # Shuffle files with fixed seed for reproducibility
+            files = sorted([f for f in os.listdir(path) 
+                           if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
             random.Random(42).shuffle(files)
+            files = files[:min_size]  # Balance classes
             
-            # Limit to min_class_size for balance
-            files = files[:min_class_size]
-
-            # Reserve eval_per_class files for val/test (both will use this pool)
-            eval_files = files[:eval_per_class]
-            remaining_files = files[eval_per_class:]
-            # Remaining files are used as the training pool (all available)
-            train_files = remaining_files
-            val_files = eval_files
-            test_files = eval_files
+            # Split: eval_size for val/test, rest for train
+            eval_files = files[:eval_size]
+            train_files = files[eval_size:]
             
-            # Load Train
+            # Load images
             for fname in train_files:
-                fpath = os.path.join(class_path, fname)
-                img = Image.open(fpath).convert('RGB')
-                img_tensor = self.transform(img)
-                self.X_train.append(img_tensor.numpy())
-                self.y_train.append(class_label)
+                img = Image.open(os.path.join(path, fname)).convert('RGB')
+                self.X_train.append(self.transform(img).numpy())
+                self.y_train.append(label)
             
-            # Load Val and Test from the same eval pool
-            for fname in val_files:
-                fpath = os.path.join(class_path, fname)
-                img = Image.open(fpath).convert('RGB')
-                img_tensor = self.transform(img)
-                self.X_val.append(img_tensor.numpy())
-                self.y_val.append(class_label)
-            for fname in test_files:
-                fpath = os.path.join(class_path, fname)
-                img = Image.open(fpath).convert('RGB')
-                img_tensor = self.transform(img)
-                self.X_test.append(img_tensor.numpy())
-                self.y_test.append(class_label)
-                
+            for fname in eval_files:
+                img = Image.open(os.path.join(path, fname)).convert('RGB')
+                tensor = self.transform(img).numpy()
+                self.X_val.append(tensor)
+                self.y_val.append(label)
+                self.X_test.append(tensor)
+                self.y_test.append(label)
+        
+        # Convert to arrays
         self.X_train = np.array(self.X_train)
         self.y_train = np.array(self.y_train)
         self.X_val = np.array(self.X_val)
@@ -164,28 +127,14 @@ class PDScalogram:
         self.X_test = np.array(self.X_test)
         self.y_test = np.array(self.y_test)
         
-        print(f"Data loaded: Train={len(self.X_train)}, Val={len(self.X_val)}, Test={len(self.X_test)}")
-        
-        # Distribution check
-        for name, y in [('Train', self.y_train), ('Val', self.y_val), ('Test', self.y_test)]:
-            unique, counts = np.unique(y, return_counts=True)
-            print(f"{name} distribution: {dict(zip(unique, counts))}")
-
-    def _shuffle(self):
-        # Shuffle training samples
-        index = list(range(self.X_train.shape[0]))
-        random.Random(0).shuffle(index)
-        self.X_train = self.X_train[index]
-        self.y_train = np.array(tuple(self.y_train[i] for i in index))
-
-        # Shuffle val samples
-        index = list(range(self.X_val.shape[0]))
-        random.Random(0).shuffle(index)
-        self.X_val = self.X_val[index]
-        self.y_val = np.array(tuple(self.y_val[i] for i in index))
-
-        # Shuffle test samples
-        index = list(range(self.X_test.shape[0]))
-        random.Random(0).shuffle(index)
-        self.X_test = self.X_test[index]
-        self.y_test = np.array(tuple(self.y_test[i] for i in index))
+        print(f'Loaded: Train={len(self.X_train)}, Val={len(self.X_val)}, Test={len(self.X_test)}')
+    
+    def _shuffle_all(self):
+        """Shuffle all splits with fixed seed."""
+        for X, y, seed in [(self.X_train, self.y_train, 0),
+                           (self.X_val, self.y_val, 1),
+                           (self.X_test, self.y_test, 2)]:
+            idx = list(range(len(X)))
+            random.Random(seed).shuffle(idx)
+            X[:] = X[idx]
+            y[:] = y[idx]
