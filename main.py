@@ -35,6 +35,8 @@ def get_args():
     # Model
     parser.add_argument('--model', type=str, default='covamnet', 
                         choices=['cosine', 'protonet', 'covamnet'])
+    parser.add_argument('--covamnet_classifier', action='store_true',
+                        help='Use learnable classifier in CovaMNet (default: pure metric)')
     
     # Few-shot settings
     parser.add_argument('--way_num', type=int, default=3)
@@ -61,14 +63,18 @@ def get_args():
     return parser.parse_args()
 
 
-def get_model(name, device):
-    """Initialize model by name."""
-    models = {
-        'cosine': CosineNet,
-        'protonet': ProtoNet,
-        'covamnet': CovaMNet,
-    }
-    model = models[name](use_gpu=(device == 'cuda'))
+def get_model(args):
+    """Initialize model based on args."""
+    device = args.device
+    use_gpu = (device == 'cuda')
+    
+    if args.model == 'covamnet':
+        model = CovaMNet(use_classifier=args.covamnet_classifier, use_gpu=use_gpu)
+    elif args.model == 'protonet':
+        model = ProtoNet(use_gpu=use_gpu)
+    else:  # cosine
+        model = CosineNet(use_gpu=use_gpu)
+    
     return model.to(device)
 
 
@@ -164,13 +170,13 @@ def calculate_p_value(acc, baseline, n):
 
 def test_final(net, loader, args):
     """
-    Final evaluation: 150 episodes, 1-shot 1-query.
+    Final evaluation: 150 episodes, K-shot (same as training), 1-query.
     
     Metrics: Accuracy, Precision, Recall, F1, p-value
     Plots: Confusion Matrix (rows sum to 150), t-SNE
     """
     print(f"\n{'='*50}")
-    print(f"Final Test: {args.model} | {args.shot_num}-shot training")
+    print(f"Final Test: {args.model} | {args.shot_num}-shot")
     print(f"150 episodes × {args.way_num} classes × 1 query = 450 predictions")
     print('='*50)
     
@@ -181,8 +187,8 @@ def test_final(net, loader, args):
         for query, q_labels, support, s_labels in tqdm(loader, desc='Testing'):
             B, NQ, C, H, W = query.shape
             
-            # Final test always uses 1-shot
-            support = support.view(B, args.way_num, 1, C, H, W).to(args.device)
+            # Use same shot_num as training
+            support = support.view(B, args.way_num, args.shot_num, C, H, W).to(args.device)
             query = query.to(args.device)
             targets = q_labels.view(-1).to(args.device)
             
@@ -216,6 +222,7 @@ def test_final(net, loader, args):
     # Save results
     samples_str = f"_{args.training_samples}samples" if args.training_samples else "_allsamples"
     
+    # Individual result file (per experiment)
     result_file = os.path.join(args.path_results, 
                                f"results_{args.model}_{args.shot_num}shot{samples_str}.txt")
     with open(result_file, 'w') as f:
@@ -228,13 +235,22 @@ def test_final(net, loader, args):
         f.write(f"F1-Score: {f1:.4f}\n")
         f.write(f"p-value: {p_val:.2e}\n")
     
-    # Append to summary
+    # Append to summary by training samples
     summary_file = os.path.join(args.path_results, f"summary{samples_str}.txt")
     write_header = not os.path.exists(summary_file) or os.path.getsize(summary_file) == 0
     with open(summary_file, 'a') as f:
         if write_header:
             f.write("Model\tShot\tAccuracy\tPrecision\tRecall\tF1\tp-value\n")
         f.write(f"{args.model}\t{args.shot_num}\t{acc:.4f}\t{prec:.4f}\t{rec:.4f}\t{f1:.4f}\t{p_val:.2e}\n")
+    
+    # Append to model-specific summary (all results for this model)
+    model_summary_file = os.path.join(args.path_results, f"summary_{args.model}.txt")
+    write_header = not os.path.exists(model_summary_file) or os.path.getsize(model_summary_file) == 0
+    with open(model_summary_file, 'a') as f:
+        if write_header:
+            f.write("Shot\tSamples\tAccuracy\tPrecision\tRecall\tF1\tp-value\n")
+        samples_val = args.training_samples if args.training_samples else "all"
+        f.write(f"{args.shot_num}\t{samples_val}\t{acc:.4f}\t{prec:.4f}\t{rec:.4f}\t{f1:.4f}\t{p_val:.2e}\n")
     
     # Plots
     cm_path = os.path.join(args.path_results, 
@@ -305,16 +321,16 @@ def main():
     val_ds = FewshotDataset(val_X, val_y, args.episode_num_val,
                             args.way_num, args.shot_num, 1, args.seed)
     
-    # Final test: 150 episodes, 1-shot, 1-query
+    # Final test: 150 episodes, K-shot (same as training), 1-query
     test_ds = FewshotDataset(test_X, test_y, 150,
-                             args.way_num, 1, 1, args.seed)
+                             args.way_num, args.shot_num, 1, args.seed)
     
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size)
     test_loader = DataLoader(test_ds, batch_size=args.batch_size)
     
     # Model
-    net = get_model(args.model, args.device)
+    net = get_model(args)
     
     if args.mode == 'train':
         train_loop(net, train_loader, val_loader, args)

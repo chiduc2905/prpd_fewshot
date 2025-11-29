@@ -59,3 +59,5 @@ for model in covamnet protonet cosine; do
     done
 done
 ```
+Secret 
+for s in 30 60 90; do for m in covamnet protonet cosine; do for k in 1 5; do python main.py --model $m --shot_num $k --training_samples $s --mode train; [ "$m" == "covamnet" ] && python main.py --model $m --shot_num $k --training_samples $s --mode train --covamnet_classifier; done; done; done

@@ -10,7 +10,7 @@ from net.utils import init_weights
 class CovarianceNet(nn.Module):
     """Few-shot classifier using covariance-based similarity."""
     
-    def __init__(self, norm_layer=nn.BatchNorm2d, num_classes=5, init_type='normal', use_gpu=True, input_size=64, use_classifier=False):
+    def __init__(self, norm_layer=nn.BatchNorm2d, num_classes=5, init_type='normal', use_gpu=True, input_size=64, use_classifier=True):
         super(CovarianceNet, self).__init__()
 
         if type(norm_layer) == str:
@@ -25,6 +25,7 @@ class CovarianceNet(nn.Module):
             use_bias = norm_layer == nn.InstanceNorm2d
 
         self.features = Conv64F_Encoder(norm_layer=norm_layer)
+        self.encoder = self.features  # Alias for t-SNE feature extraction
         self.covariance = CovaBlock()
 
         # Feature map size: input_size / 4 (2 max-pool layers)
