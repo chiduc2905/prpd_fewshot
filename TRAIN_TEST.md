@@ -4,12 +4,12 @@
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--dataset_path` | `./scalogram_images/` | Dataset path |
+| `--dataset_path` | `./prpd_images_for_cnn/` | Dataset path |
 | `--path_weights` | `checkpoints/` | Checkpoint directory |
 | `--path_results` | `results/` | Results directory |
 | `--weights` | None | Custom weights for testing |
 | `--model` | `covamnet` | Model: cosine, protonet, covamnet |
-| `--way_num` | 3 | N-way (classes per episode) |
+| `--way_num` | 2 | N-way (classes per episode) |
 | `--shot_num` | 1 | K-shot (support samples) |
 | `--query_num` | 19/15 | Query samples (auto by shot) |
 | `--training_samples` | None | Limit total training samples |
@@ -27,14 +27,14 @@
 ## Training
 
 ```bash
-# Default (CovaMNet 3-way 1-shot)
+# Default (CovaMNet 2-way 1-shot)
 python main.py --mode train
 
 # ProtoNet 5-shot
 python main.py --model protonet --shot_num 5 --mode train
 
-# Limited samples (60 total = 20/class)
-python main.py --model cosine --training_samples 60 --mode train
+# Limited samples (40 total = 20/class)
+python main.py --model cosine --training_samples 40 --mode train
 ```
 
 ## Testing
