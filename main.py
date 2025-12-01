@@ -12,7 +12,7 @@ from sklearn.metrics import precision_recall_fscore_support
 
 from dataset import PDScalogram
 from dataloader.dataloader import FewshotDataset
-from function.function import ContrastiveLoss, seed_func, plot_confusion_matrix, plot_tsne
+from function.function import ContrastiveLoss, CenterLoss, SupConLoss, TripletLoss, seed_func, plot_confusion_matrix, plot_tsne
 from net.cosine import CosineNet
 from net.protonet import ProtoNet
 from net.covamnet import CovaMNet
@@ -57,6 +57,19 @@ def get_args():
     parser.add_argument('--device', type=str, 
                         default='cuda' if torch.cuda.is_available() else 'cpu')
     
+    # Loss
+    parser.add_argument('--loss', type=str, default='contrastive', 
+                        choices=['contrastive', 'supcon', 'triplet'],
+                        help='Loss function: contrastive (default), supcon, or triplet')
+    parser.add_argument('--temp', type=float, default=0.1,
+                        help='Temperature for SupCon loss (default: 0.1)')
+    parser.add_argument('--margin', type=float, default=0.5,
+                        help='Margin for Triplet loss (default: 0.5)')
+    
+    # Center Loss
+    parser.add_argument('--lambda_center', type=float, default=0.001, 
+                        help='Weight for Center Loss (default: 0.001)')
+    
     # Mode
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'test'])
     
@@ -84,9 +97,23 @@ def get_model(args):
 
 def train_loop(net, train_loader, val_loader, args):
     """Train with validation-based model selection."""
-    optimizer = optim.Adam(net.parameters(), lr=args.lr)
+    # Loss functions
+    if args.loss == 'supcon':
+        criterion_main = SupConLoss(temperature=args.temp).to(args.device)
+    elif args.loss == 'triplet':
+        criterion_main = TripletLoss(margin=args.margin).to(args.device)
+    else:
+        criterion_main = ContrastiveLoss().to(args.device)
+        
+    criterion_center = CenterLoss(num_classes=args.way_num, feat_dim=1600, use_gpu=(args.device == 'cuda'))
+    
+    # Optimizer (optimize both model and center loss parameters)
+    optimizer = optim.Adam([
+        {'params': net.parameters()},
+        {'params': criterion_center.parameters()}
+    ], lr=args.lr)
+    
     scheduler = lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
-    loss_fn = ContrastiveLoss().to(args.device)
     
     best_acc = 0.0
     
@@ -106,7 +133,38 @@ def train_loop(net, train_loader, val_loader, args):
             
             optimizer.zero_grad()
             scores = net(query, support)
-            loss = loss_fn(scores, targets)
+            
+            # 1. Main Loss (Contrastive, SupCon, or Triplet)
+            if args.loss == 'supcon':
+                # SupCon needs features
+                q_flat = query.view(-1, C, H, W)
+                features = net.encoder(q_flat)
+                features = features.view(features.size(0), -1)
+                features = features.unsqueeze(1) 
+                loss_main = criterion_main(features, targets)
+            
+            elif args.loss == 'triplet':
+                # Triplet needs features
+                q_flat = query.view(-1, C, H, W)
+                features = net.encoder(q_flat)
+                features = features.view(features.size(0), -1)
+                loss_main = criterion_main(features, targets)
+                
+            else:
+                # Contrastive needs scores
+                loss_main = criterion_main(scores, targets)
+            
+            # 2. Center Loss
+            # Extract features from query images
+            q_flat = query.view(-1, C, H, W)
+            features = net.encoder(q_flat)
+            features = features.view(features.size(0), -1) # Flatten to (N, feat_dim)
+            
+            loss_center = criterion_center(features, targets)
+            
+            # Total Loss
+            loss = loss_main + args.lambda_center * loss_center
+            
             loss.backward()
             optimizer.step()
             
