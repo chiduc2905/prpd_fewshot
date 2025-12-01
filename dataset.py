@@ -125,28 +125,39 @@ class PDScalogram:
         print(f'  Mean: {[f"{m:.3f}" for m in self.mean]}')
         print(f'  Std:  {[f"{s:.3f}" for s in self.std]}')
         
-        # Final transform with normalization
+        # Standard transform (Val/Test)
         self.transform = transforms.Compose([
             transforms.Resize((64, 64)),
             transforms.ToTensor(),
             transforms.Normalize(self.mean, self.std),
         ])
+
+        # Train transform (Augmentation for PRPD)
+        # - ColorJitter: Simulates sensor sensitivity/noise
+        # - RandomErasing: Simulates missing data/occlusion (robustness)
+        self.train_transform = transforms.Compose([
+            transforms.Resize((64, 64)),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2),
+            transforms.ToTensor(),
+            transforms.Normalize(self.mean, self.std),
+            transforms.RandomErasing(p=0.5, scale=(0.02, 0.1), value=0), 
+        ])
     
     def _load_images(self, train_files, val_files, test_files):
         """Load images applying normalization."""
         
-        def load_list(file_dict, dest_X, dest_y):
+        def load_list(file_dict, dest_X, dest_y, transform):
             for class_name, files in file_dict.items():
                 label = CLASS_MAP[class_name]
                 path = os.path.join(self.data_path, class_name)
                 for fname in files:
                     img = Image.open(os.path.join(path, fname)).convert('RGB')
-                    dest_X.append(self.transform(img).numpy())
+                    dest_X.append(transform(img).numpy())
                     dest_y.append(label)
         
-        load_list(train_files, self.X_train, self.y_train)
-        load_list(val_files, self.X_val, self.y_val)
-        load_list(test_files, self.X_test, self.y_test)
+        load_list(train_files, self.X_train, self.y_train, self.train_transform)
+        load_list(val_files, self.X_val, self.y_val, self.transform)
+        load_list(test_files, self.X_test, self.y_test, self.transform)
         
         # Convert to arrays
         self.X_train = np.array(self.X_train)

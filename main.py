@@ -51,6 +51,8 @@ def get_args():
     parser.add_argument('--num_epochs', type=int, default=None)
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--weight_decay', type=float, default=1e-4, help='L2 Regularization')
+    parser.add_argument('--dropout', type=float, default=0.0, help='Dropout rate')
     parser.add_argument('--step_size', type=int, default=10)
     parser.add_argument('--gamma', type=float, default=0.1)
     parser.add_argument('--seed', type=int, default=42)
@@ -84,7 +86,7 @@ def get_model(args):
 
 def train_loop(net, train_loader, val_loader, args):
     """Train with validation-based model selection."""
-    optimizer = optim.Adam(net.parameters(), lr=args.lr)
+    optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
     loss_fn = ContrastiveLoss().to(args.device)
     
