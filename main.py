@@ -12,7 +12,7 @@ from sklearn.metrics import precision_recall_fscore_support
 
 from dataset import PDScalogram
 from dataloader.dataloader import FewshotDataset
-from function.function import ContrastiveLoss, seed_func, plot_confusion_matrix, plot_tsne
+from function.function import ContrastiveLoss, ArcFace, seed_func, plot_confusion_matrix, plot_tsne
 from net.cosine import CosineNet
 from net.protonet import ProtoNet
 from net.covamnet import CovaMNet
@@ -53,6 +53,8 @@ def get_args():
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='L2 Regularization')
     parser.add_argument('--dropout', type=float, default=0.0, help='Dropout rate')
+    parser.add_argument('--use_arcface', action='store_true', help='Use ArcFace auxiliary loss')
+    parser.add_argument('--arcface_scale', type=float, default=0.1, help='Weight for ArcFace loss')
     parser.add_argument('--step_size', type=int, default=10)
     parser.add_argument('--gamma', type=float, default=0.1)
     parser.add_argument('--seed', type=int, default=42)
@@ -90,6 +92,13 @@ def train_loop(net, train_loader, val_loader, args):
     scheduler = lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
     loss_fn = ContrastiveLoss().to(args.device)
     
+    if args.use_arcface:
+        print("Initializing ArcFace Auxiliary Loss...")
+        # Input: 64 (Encoder output) -> Output: Way (2)
+        arcface = ArcFace(in_features=64, out_features=args.way_num).to(args.device)
+        # Add ArcFace parameters to optimizer
+        optimizer.add_param_group({'params': arcface.parameters()})
+    
     best_acc = 0.0
     
     for epoch in range(1, args.num_epochs + 1):
@@ -102,20 +111,6 @@ def train_loop(net, train_loader, val_loader, args):
             B = query.shape[0]
             C, H, W = query.shape[2], query.shape[3], query.shape[4]
             
-            support = support.view(B, args.way_num, args.shot_num, C, H, W).to(args.device)
-            query = query.to(args.device)
-            targets = q_labels.view(-1).to(args.device)
-            
-            optimizer.zero_grad()
-            scores = net(query, support)
-            loss = loss_fn(scores, targets)
-            loss.backward()
-            optimizer.step()
-            
-            total_loss += loss.item()
-            pbar.set_postfix(loss=f'{loss.item():.4f}')
-        
-        scheduler.step()
         
         # Validate
         acc = evaluate(net, val_loader, args)
