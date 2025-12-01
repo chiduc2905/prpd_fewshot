@@ -111,7 +111,36 @@ def train_loop(net, train_loader, val_loader, args):
             B = query.shape[0]
             C, H, W = query.shape[2], query.shape[3], query.shape[4]
             
+            support = support.view(B, args.way_num, args.shot_num, C, H, W).to(args.device)
+            query = query.to(args.device)
+            targets = q_labels.view(-1).to(args.device)
+            
+            # Forward Main
+            scores = net(query, support)
+            loss = loss_fn(scores, targets)
+            
+            if args.use_arcface:
+                # Auxiliary ArcFace Loss on Query Features
+                # 1. Extract features from Encoder
+                q_flat = query.view(-1, C, H, W)
+                q_feat = net.encoder(q_flat)
+                # 2. Global Average Pooling -> (B*NQ, 64)
+                q_vec = nn.functional.adaptive_avg_pool2d(q_feat, 1).view(q_feat.size(0), -1)
+                # 3. ArcFace Forward
+                arc_out = arcface(q_vec, targets)
+                # 4. ArcFace Loss
+                loss_arc = loss_fn(arc_out, targets)
+                # 5. Combine
+                loss = loss + args.arcface_scale * loss_arc
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            pbar.set_postfix(loss=f'{loss.item():.4f}')
         
+        scheduler.step()
         # Validate
         acc = evaluate(net, val_loader, args)
         print(f'Epoch {epoch}: Loss={total_loss/len(train_loader):.4f}, Val Acc={acc:.4f}')
