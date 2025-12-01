@@ -4,6 +4,7 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
@@ -147,6 +148,10 @@ def train_loop(net, train_loader, val_loader, args):
                 q_flat = query.view(-1, C, H, W)
                 features = net.encoder(q_flat)
                 features = features.view(features.size(0), -1)
+                
+                # Normalize features for stability
+                features = F.normalize(features, p=2, dim=1)
+                
                 features = features.unsqueeze(1) 
                 loss_main = criterion_main(features, targets)
             
@@ -155,6 +160,10 @@ def train_loop(net, train_loader, val_loader, args):
                 q_flat = query.view(-1, C, H, W)
                 features = net.encoder(q_flat)
                 features = features.view(features.size(0), -1)
+                
+                # Normalize features for stability
+                features = F.normalize(features, p=2, dim=1)
+                
                 loss_main = criterion_main(features, targets)
                 
             else:
@@ -166,6 +175,9 @@ def train_loop(net, train_loader, val_loader, args):
             q_flat = query.view(-1, C, H, W)
             features = net.encoder(q_flat)
             features = features.view(features.size(0), -1) # Flatten to (N, feat_dim)
+            
+            # Normalize features for stability (Center Loss works best with normalized features)
+            features = F.normalize(features, p=2, dim=1)
             
             loss_center = criterion_center(features, targets)
             
