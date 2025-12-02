@@ -115,11 +115,7 @@ def train_loop(net, train_loader, val_loader, args):
         dummy_feat = net.encoder(dummy_input)
         feat_dim = dummy_feat.view(1, -1).size(1)
         
-<<<<<<< HEAD
     criterion_center = CenterLoss(num_classes=args.way_num, feat_dim=feat_dim, device=device)
-=======
-    criterion_center = CenterLoss(num_classes=args.way_num, feat_dim=feat_dim, device=args.device)
->>>>>>> 7bcb50ced6163ac4d72da6a057bd3db392a60616
     
     # Optimizer (optimize both model and center loss parameters)
     optimizer = optim.Adam([
