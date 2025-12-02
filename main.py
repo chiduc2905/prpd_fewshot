@@ -64,8 +64,8 @@ def get_args():
                         help='Loss function: contrastive (default), supcon, or triplet')
     parser.add_argument('--temp', type=float, default=0.01,
                         help='Temperature for SupCon loss (default: 0.01)')
-    parser.add_argument('--margin', type=float, default=0.5,
-                        help='Margin for Triplet loss (default: 0.5)')
+    parser.add_argument('--margin', type=float, default=0.1,
+                        help='Margin for Triplet loss (default: 0.1)')
     
     # Center Loss
     parser.add_argument('--lambda_center', type=float, default=0.1, 
