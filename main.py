@@ -14,7 +14,7 @@ import wandb
 
 from dataset import PDScalogram
 from dataloader.dataloader import FewshotDataset
-from function.function import ContrastiveLoss, CenterLoss, SupConLoss, TripletLoss, seed_func, plot_confusion_matrix, plot_tsne
+from function.function import ContrastiveLoss, CenterLoss, TripletLoss, seed_func, plot_confusion_matrix, plot_tsne
 from net.cosine import CosineNet
 from net.protonet import ProtoNet
 from net.covamnet import CovaMNet
@@ -61,8 +61,8 @@ def get_args():
     
     # Loss
     parser.add_argument('--loss', type=str, default='contrastive', 
-                        choices=['contrastive', 'supcon', 'triplet'],
-                        help='Loss function: contrastive (default), supcon, or triplet')
+                        choices=['contrastive', 'triplet'],
+                        help='Loss function: contrastive (default) or triplet')
     parser.add_argument('--temp', type=float, default=0.01,
                         help='Temperature for SupCon loss (default: 0.01)')
     parser.add_argument('--margin', type=float, default=0.1,
@@ -102,9 +102,7 @@ def train_loop(net, train_loader, val_loader, args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Loss functions
-    if args.loss == 'supcon':
-        criterion_main = SupConLoss(temperature=args.temp).to(device)
-    elif args.loss == 'triplet':
+    if args.loss == 'triplet':
         criterion_main = TripletLoss(margin=args.margin).to(device)
     else:
         criterion_main = ContrastiveLoss().to(device)
@@ -145,8 +143,8 @@ def train_loop(net, train_loader, val_loader, args):
             scores = net(query, support)
             
             # 1. Main Loss (Contrastive, SupCon, or Triplet)
-            # 1. Main Loss (Contrastive, SupCon, or Triplet)
-            if args.loss in ['supcon', 'triplet']:
+            # 1. Main Loss (Contrastive or Triplet)
+            if args.loss == 'triplet':
                 # For metric learning losses, we need to combine support and query features
                 # to ensure we have enough positive pairs (at least 1 support + 1 query per class)
                 
@@ -173,14 +171,8 @@ def train_loop(net, train_loader, val_loader, args):
                 # Normalize features for stability
                 all_feats = F.normalize(all_feats, p=2, dim=1)
                 
-                if args.loss == 'supcon':
-                    # SupCon expects (batch, n_views, feat_dim)
-                    # We treat each sample as a separate view
-                    all_feats = all_feats.unsqueeze(1)
-                    loss_main = criterion_main(all_feats, all_targets)
-                else:
-                    # Triplet
-                    loss_main = criterion_main(all_feats, all_targets)
+                # Triplet
+                loss_main = criterion_main(all_feats, all_targets)
                 
             else:
                 # Contrastive needs scores
@@ -224,7 +216,7 @@ def train_loop(net, train_loader, val_loader, args):
         # Save best
         if val_acc > best_acc:
             best_acc = val_acc
-            path = os.path.join(args.path_weights, f'{args.model}_{args.shot_num}shot_best.pth')
+            path = os.path.join(args.path_weights, f'{args.model}_{args.shot_num}shot_{args.loss}_lambda{args.lambda_center}_best.pth')
             torch.save(net.state_dict(), path)
             print(f'  → Best model saved ({val_acc:.4f})')
             # Log best model as artifact if needed, or just log the metric
@@ -337,7 +329,7 @@ def test_final(net, loader, args):
     
     # Confusion Matrix
     cm_path = os.path.join(args.path_results, 
-                           f"confusion_matrix_{args.model}_{args.shot_num}shot{samples_str}.png")
+                           f"confusion_matrix_{args.model}_{args.shot_num}shot_{args.loss}_lambda{args.lambda_center}{samples_str}.png")
     plot_confusion_matrix(all_targets, all_preds, args.way_num, cm_path)
     wandb.log({"confusion_matrix": wandb.Image(cm_path)})
     
@@ -345,7 +337,7 @@ def test_final(net, loader, args):
     if all_features:
         features = np.vstack(all_features)
         tsne_path = os.path.join(args.path_results, 
-                                 f"tsne_{args.model}_{args.shot_num}shot{samples_str}.png")
+                                 f"tsne_{args.model}_{args.shot_num}shot_{args.loss}_lambda{args.lambda_center}{samples_str}.png")
         plot_tsne(features, all_targets, args.way_num, tsne_path)
         wandb.log({"tsne_plot": wandb.Image(tsne_path)})
     
@@ -370,7 +362,7 @@ def main():
     
     # Initialize WandB with a descriptive run name
     samples_str = f"{args.training_samples}samples" if args.training_samples else "all"
-    run_name = f"{args.model}_{args.shot_num}shot_{args.loss}_{samples_str}"
+    run_name = f"{args.model}_{args.shot_num}shot_{args.loss}_lambda{args.lambda_center}_{samples_str}"
     
     wandb.init(project="pd_fewshot", config=vars(args), name=run_name, group=run_name, job_type=args.mode)
     
@@ -430,7 +422,7 @@ def main():
         train_loop(net, train_loader, val_loader, args)
         
         # Load best model for testing
-        path = os.path.join(args.path_weights, f'{args.model}_{args.shot_num}shot_best.pth')
+        path = os.path.join(args.path_weights, f'{args.model}_{args.shot_num}shot_{args.loss}_lambda{args.lambda_center}_best.pth')
         net.load_state_dict(torch.load(path))
         test_final(net, test_loader, args)
         

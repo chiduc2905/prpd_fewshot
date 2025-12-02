@@ -31,7 +31,7 @@ def main():
 
     model = 'protonet'
     shots = [1, 5]
-    losses = ['contrastive', 'supcon', 'triplet']
+    losses = ['contrastive', 'triplet']
     sample_sizes = [30, 60, 90, None]
     
     for shot in shots:
