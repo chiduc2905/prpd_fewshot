@@ -70,7 +70,7 @@ class CenterLoss(nn.Module):
         distmat.addmm_(x, centers_norm.t(), beta=1, alpha=-2)
 
         classes = torch.arange(self.num_classes).long()
-        if self.use_gpu: classes = classes.cuda()
+        classes = torch.arange(self.num_classes).long().to(self.device)
         labels = labels.unsqueeze(1).expand(batch_size, self.num_classes)
         mask = labels.eq(classes.expand(batch_size, self.num_classes))
 
