@@ -83,11 +83,11 @@ def get_model(args):
     use_gpu = (device == 'cuda')
     
     if args.model == 'covamnet':
-        model = CovaMNet(use_gpu=use_gpu)
+        model = CovaMNet(device=device)
     elif args.model == 'protonet':
-        model = ProtoNet(use_gpu=use_gpu)
+        model = ProtoNet(device=device)
     else:  # cosine
-        model = CosineNet(use_gpu=use_gpu)
+        model = CosineNet(device=device)
     
     return model.to(device)
 
@@ -112,7 +112,7 @@ def train_loop(net, train_loader, val_loader, args):
         dummy_feat = net.encoder(dummy_input)
         feat_dim = dummy_feat.view(1, -1).size(1)
         
-    criterion_center = CenterLoss(num_classes=args.way_num, feat_dim=feat_dim, use_gpu=(args.device == 'cuda'))
+    criterion_center = CenterLoss(num_classes=args.way_num, feat_dim=feat_dim, device=args.device)
     
     # Optimizer (optimize both model and center loss parameters)
     optimizer = optim.Adam([
