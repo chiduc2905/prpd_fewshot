@@ -65,8 +65,8 @@ def get_args():
                         help='Loss function: contrastive (default), supcon, or triplet')
     parser.add_argument('--temp', type=float, default=0.01,
                         help='Temperature for SupCon loss (default: 0.01)')
-    parser.add_argument('--margin', type=float, default=0.5,
-                        help='Margin for Triplet loss (default: 0.5)')
+    parser.add_argument('--margin', type=float, default=0.1,
+                        help='Margin for Triplet loss (default: 0.1)')
     
     # Center Loss
     parser.add_argument('--lambda_center', type=float, default=0.1, 
@@ -84,11 +84,11 @@ def get_model(args):
     use_gpu = (device.type == 'cuda')
     
     if args.model == 'covamnet':
-        model = CovaMNet(use_gpu=use_gpu)
+        model = CovaMNet(device=device)
     elif args.model == 'protonet':
-        model = ProtoNet(use_gpu=use_gpu)
+        model = ProtoNet(device=device)
     else:  # cosine
-        model = CosineNet(use_gpu=use_gpu)
+        model = CosineNet(device=device)
     
     return model.to(device)
 
@@ -115,7 +115,11 @@ def train_loop(net, train_loader, val_loader, args):
         dummy_feat = net.encoder(dummy_input)
         feat_dim = dummy_feat.view(1, -1).size(1)
         
+<<<<<<< HEAD
     criterion_center = CenterLoss(num_classes=args.way_num, feat_dim=feat_dim, device=device)
+=======
+    criterion_center = CenterLoss(num_classes=args.way_num, feat_dim=feat_dim, device=args.device)
+>>>>>>> 7bcb50ced6163ac4d72da6a057bd3db392a60616
     
     # Optimizer (optimize both model and center loss parameters)
     optimizer = optim.Adam([
