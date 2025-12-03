@@ -9,7 +9,7 @@ from net.utils import init_weights
 class CosineNet(nn.Module):
     """Few-shot classifier using cosine similarity metric."""
     
-    def __init__(self, init_type='normal', device='cuda'):
+    def __init__(self, init_type='kaiming', device='cuda'):
         super(CosineNet, self).__init__()
         self.encoder = Conv64F_Encoder()
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))

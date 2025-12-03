@@ -8,7 +8,7 @@ from net.utils import init_weights
 class ProtoNet(nn.Module):
     """Few-shot classifier using prototype-based Euclidean distance."""
     
-    def __init__(self, init_type='normal', device='cuda'):
+    def __init__(self, init_type='kaiming', device='cuda'):
         super(ProtoNet, self).__init__()
         self.encoder = Conv64F_Encoder()
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
