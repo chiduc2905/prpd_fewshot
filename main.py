@@ -359,7 +359,7 @@ def main():
     if args.num_epochs is None:
         args.num_epochs = 100 if args.shot_num == 1 else 70
 
-    # Auto-detect device
+    # Auto-detect device if not specified (handled by argparse default)
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     print(f"Config: {args.model} | {args.shot_num}-shot | {args.num_epochs} epochs | Device: {args.device}")
