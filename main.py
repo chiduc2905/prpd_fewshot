@@ -127,12 +127,7 @@ def train_loop(net, train_loader, val_loader, args):
     
     scheduler = lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
     
-    if args.use_arcface:
-        print("Initializing ArcFace Auxiliary Loss...")
-        # Input: 64 (Encoder output) -> Output: Way (2)
-        arcface = ArcFace(in_features=64, out_features=args.way_num).to(args.device)
-        # Add ArcFace parameters to optimizer
-        optimizer.add_param_group({'params': arcface.parameters()})
+
     
     best_acc = 0.0
     
