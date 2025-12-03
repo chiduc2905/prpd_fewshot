@@ -1,7 +1,7 @@
 #!/bin/bash
 # Train all models with both 1-shot and 5-shot for all training samples
 
-SAMPLES=(30 60 90)
+SAMPLES=(12 60 "all")
 MODELS=("covamnet" "protonet" "cosine")
 SHOTS=(1 5)
 
@@ -24,7 +24,11 @@ for shot in "${SHOTS[@]}"; do
         for model in "${MODELS[@]}"; do
             echo ""
             echo ">>> $model ${shot}-shot ($sample samples)"
-            python3 main.py --model $model --shot_num $shot --training_samples $sample --mode train
+            if [ "$sample" == "all" ]; then
+                python3 main.py --model $model --shot_num $shot --mode train
+            else
+                python3 main.py --model $model --shot_num $shot --training_samples $sample --mode train
+            fi
         done
     done
 done

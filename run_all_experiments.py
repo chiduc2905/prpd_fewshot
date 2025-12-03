@@ -4,13 +4,13 @@ import argparse
 
 def get_args():
     parser = argparse.ArgumentParser(description='Run all experiments')
-    parser.add_argument('--project', type=str, default='pd_fewshot', help='WandB project name')
+    parser.add_argument('--project', type=str, default='prpd', help='WandB project name')
     return parser.parse_args()
 
 # Configuration
 models = ['covamnet', 'protonet', 'cosine']
 shots = [1, 5]
-samples_list = [30, 60, 90, None]  # None means all samples
+samples_list = [12, 60, None]  # None means all samples
 losses = ['contrastive', 'triplet']
 lambda_centers = [0, 0.1]
 

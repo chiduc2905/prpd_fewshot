@@ -76,7 +76,7 @@ def get_args():
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'test'])
     
     # WandB
-    parser.add_argument('--project', type=str, default='pd_fewshot',
+    parser.add_argument('--project', type=str, default='prpd',
                         help='WandB project name')
     
     return parser.parse_args()
