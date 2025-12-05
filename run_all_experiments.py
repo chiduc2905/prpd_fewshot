@@ -18,6 +18,15 @@ total_experiments = len(models) * len(shots) * len(samples_list) * len(losses)
 current_experiment = 0
 
 args = get_args()
+print(f"=" * 80)
+print(f"Configuration:")
+print(f"  Models: {models} ({len(models)})")
+print(f"  Shots: {shots} ({len(shots)})")
+print(f"  Samples: {samples_list} ({len(samples_list)})")
+print(f"  Losses: {losses} ({len(losses)})")
+print(f"  Lambda Center: {lambda_center} (fixed)")
+print(f"  Total: {len(models)} × {len(shots)} × {len(samples_list)} × {len(losses)} = {total_experiments}")
+print(f"=" * 80)
 print(f"Starting {total_experiments} experiments on project '{args.project}'...")
 
 for model in models:
