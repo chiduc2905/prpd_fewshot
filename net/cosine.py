@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from net.encoder import Conv64F_Encoder
+from net.encoders.base_encoder import Conv64F_Encoder
 from net.utils import init_weights
 
 

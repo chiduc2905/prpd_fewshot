@@ -1,7 +1,8 @@
 """Prototypical Network for few-shot learning."""
 import torch
 import torch.nn as nn
-from net.encoder import Conv64F_Encoder, Conv64F_Paper_Encoder
+from net.encoders.base_encoder import Conv64F_Encoder
+from net.encoders.protonet_encoder import Conv64F_Paper_Encoder
 from net.utils import init_weights
 
 

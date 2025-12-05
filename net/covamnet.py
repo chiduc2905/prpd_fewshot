@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 import functools
-from net.encoder import Conv64F_Encoder, get_norm_layer
+from net.encoders.base_encoder import Conv64F_Encoder, get_norm_layer
 from net.cova_block import CovaBlock
 from net.utils import init_weights
 

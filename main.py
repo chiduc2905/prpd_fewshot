@@ -18,6 +18,8 @@ from function.function import ContrastiveLoss, CenterLoss, TripletLoss, seed_fun
 from net.cosine import CosineNet
 from net.protonet import ProtoNet
 from net.covamnet import CovaMNet
+from net.matchingnet import MatchingNet
+from net.relationnet import RelationNet
 
 
 # =============================================================================
@@ -36,7 +38,7 @@ def get_args():
     
     # Model
     parser.add_argument('--model', type=str, default='covamnet', 
-                        choices=['cosine', 'protonet', 'covamnet'])
+                        choices=['cosine', 'protonet', 'covamnet', 'matchingnet', 'relationnet'])
     parser.add_argument('--encoder_type', type=str, default='default',
                         choices=['default', 'paper'],
                         help='Encoder type for ProtoNet: default (GroupNorm) or paper (BatchNorm, official)')
@@ -94,6 +96,10 @@ def get_model(args):
         model = CovaMNet(device=device)
     elif args.model == 'protonet':
         model = ProtoNet(encoder_type=args.encoder_type, device=device)
+    elif args.model == 'matchingnet':
+        model = MatchingNet(device=device)
+    elif args.model == 'relationnet':
+        model = RelationNet(device=device)
     else:  # cosine
         model = CosineNet(device=device)
     
