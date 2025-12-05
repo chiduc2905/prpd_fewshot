@@ -9,24 +9,24 @@ from net.utils import init_weights
 class ProtoNet(nn.Module):
     """Few-shot classifier using prototype-based Euclidean distance."""
     
-    def __init__(self, encoder_type='default', init_type='kaiming', device='cuda'):
+    def __init__(self, use_base_encoder=False, init_type='kaiming', device='cuda'):
         """Initialize ProtoNet with encoder selection.
         
         Args:
-            encoder_type: 'default' (Conv64F_Encoder with GroupNorm) or 
-                         'paper' (Conv64F_Paper_Encoder matching official implementation)
+            use_base_encoder: If True, use Conv64F_Encoder (GroupNorm), 
+                             else use Conv64F_Paper_Encoder (BatchNorm, official)
             init_type: Weight initialization type
             device: Device to use
         """
         super(ProtoNet, self).__init__()
         
-        if encoder_type == 'paper':
-            self.encoder = Conv64F_Paper_Encoder()  # Output: (B, 1024) flattened
-            self.use_pooling = False  # Paper encoder already flattens
-        else:
+        if use_base_encoder:
             self.encoder = Conv64F_Encoder()  # Output: (B, 64, H, W) feature maps
             self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-            self.use_pooling = True  # Need to pool and flatten
+            self.use_pooling = True
+        else:
+            self.encoder = Conv64F_Paper_Encoder()  # Output: (B, 1024) flattened
+            self.use_pooling = False  # Paper encoder already flattens
         
         init_weights(self, init_type=init_type)
         self.to(device)

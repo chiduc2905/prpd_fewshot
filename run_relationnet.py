@@ -6,7 +6,7 @@ def run_relationnet_experiments(shots=[1, 5], samples_list=[12, 60, None]):
     """Run RelationNet experiments with different configurations."""
     
     model = 'relationnet'
-    lambda_center = 0.1
+    lambda_center = 0
     
     total = len(shots) * len(samples_list)
     current = 0

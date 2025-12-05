@@ -39,9 +39,8 @@ def get_args():
     # Model
     parser.add_argument('--model', type=str, default='covamnet', 
                         choices=['cosine', 'protonet', 'covamnet', 'matchingnet', 'relationnet'])
-    parser.add_argument('--encoder_type', type=str, default='paper',
-                        choices=['default', 'paper'],
-                        help='Encoder type for ProtoNet: default (GroupNorm) or paper (BatchNorm, official)')
+    parser.add_argument('--use_base_encoder', action='store_true',
+                        help='Use Conv64F_Encoder (GroupNorm) for ProtoNet instead of paper-specific encoder')
 
     
     # Few-shot settings
@@ -92,13 +91,16 @@ def get_model(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     use_gpu = (device.type == 'cuda')
     
-    if args.model == 'covamnet':
+    if args.model == 'protonet':
+        # Only ProtoNet supports encoder selection
+        model = ProtoNet(use_base_encoder=args.use_base_encoder, device=device)
+    elif args.model == 'covamnet':
         model = CovaMNet(device=device)
-    elif args.model == 'protonet':
-        model = ProtoNet(encoder_type=args.encoder_type, device=device)
     elif args.model == 'matchingnet':
+        # MatchingNet: paper-specific encoder only (LSTM dimensions hardcoded)
         model = MatchingNet(device=device)
     elif args.model == 'relationnet':
+        # RelationNet: paper-specific encoder only (RelationBlock expects 4x4 features)
         model = RelationNet(device=device)
     else:  # cosine
         model = CosineNet(device=device)
@@ -413,7 +415,23 @@ def main():
     # Auto-detect device if not specified (handled by argparse default)
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
+    # Determine encoder info for logging
+    if args.model == 'protonet':
+        if args.use_base_encoder:
+            encoder_info = "Conv64F_Encoder (GroupNorm) [--use_base_encoder]"
+        else:
+            encoder_info = "Conv64F_Paper_Encoder (BatchNorm) [default]"
+    elif args.model == 'covamnet' or args.model == 'cosine':
+        encoder_info = "Conv64F_Encoder (GroupNorm)"
+    elif args.model == 'matchingnet':
+        encoder_info = "MatchingNetEncoder (BatchNorm, paper-only)"
+    elif args.model == 'relationnet':
+        encoder_info = "RelationNetEncoder (BatchNorm, paper-only)"
+    else:
+        encoder_info = "unknown"
+    
     print(f"Config: {args.model} | {args.shot_num}-shot | {args.num_epochs} epochs | Device: {args.device}")
+    print(f"Encoder: {encoder_info}")
     
     # Initialize WandB with a descriptive run name
     samples_str = f"{args.training_samples}samples" if args.training_samples else "all"

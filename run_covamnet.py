@@ -33,7 +33,7 @@ def main():
     model = 'covamnet'
     shots = [1, 5]
     losses = ['contrastive', 'triplet']
-    lambda_center = 0.1
+    lambda_center = 0
     sample_sizes = [12, 60, None]
     
     for shot in shots:

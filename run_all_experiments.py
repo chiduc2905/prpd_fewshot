@@ -11,7 +11,7 @@ def get_args():
 models = ['covamnet', 'protonet', 'cosine', 'matchingnet', 'relationnet']
 shots = [1, 5]
 samples_list = [12, 60, None]  # None means all samples
-lambda_center = 0.1
+lambda_center = 0
 
 total_experiments = len(models) * len(shots) * len(samples_list)
 current_experiment = 0
