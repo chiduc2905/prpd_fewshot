@@ -14,7 +14,7 @@ import wandb
 
 from dataset import PDScalogram
 from dataloader.dataloader import FewshotDataset
-from function.function import ContrastiveLoss, CenterLoss, TripletLoss, seed_func, plot_confusion_matrix, plot_tsne
+from function.function import ContrastiveLoss, RelationLoss, CenterLoss, TripletLoss, seed_func, plot_confusion_matrix, plot_tsne
 from net.cosine import CosineNet
 from net.protonet import ProtoNet
 from net.covamnet import CovaMNet
@@ -114,10 +114,14 @@ def train_loop(net, train_loader, val_loader, args):
     """Train with validation-based model selection."""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Loss functions
-    if args.loss == 'triplet':
+    # Loss functions - Auto-select based on model
+    if args.model == 'relationnet':
+        # RelationNet uses MSE loss (paper-specific)
+        criterion_main = RelationLoss().to(device)
+    elif args.loss == 'triplet':
         criterion_main = TripletLoss(margin=args.margin).to(device)
     else:
+        # Default: ContrastiveLoss (CrossEntropyLoss)
         criterion_main = ContrastiveLoss().to(device)
         
     # Calculate feature dimension dynamically

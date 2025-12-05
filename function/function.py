@@ -40,6 +40,37 @@ class ContrastiveLoss(nn.Module):
         return loss
 
 
+class RelationLoss(nn.Module):
+    """MSE loss for Relation Networks.
+    
+    From: Sung et al. "Learning to Compare: Relation Network for Few-Shot Learning" (CVPR 2018)
+    
+    Relation scores are in [0, 1], target is 1 for correct class, 0 for others.
+    """
+    
+    def __init__(self):
+        super(RelationLoss, self).__init__()
+        self.mse = nn.MSELoss()
+    
+    def forward(self, scores, targets):
+        """
+        Args:
+            scores: (N, Way) relation scores (should be in [0,1] from sigmoid)
+            targets: (N,) class labels
+        Returns:
+            MSE loss
+        """
+        N, Way = scores.size()
+        
+        # Create one-hot targets
+        one_hot = torch.zeros(N, Way).to(scores.device)
+        one_hot.scatter_(1, targets.view(-1, 1), 1)
+        
+        # MSE between scores and one-hot targets
+        loss = self.mse(scores, one_hot)
+        return loss
+
+
 class CenterLoss(nn.Module):
     """Center loss.
     

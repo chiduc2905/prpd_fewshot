@@ -2,7 +2,7 @@
 # Train all models with 5-shot for different training samples
 
 SAMPLES=(12 60 "all")
-MODELS=("covamnet" "protonet" "cosine")
+MODELS=("covamnet" "protonet" "cosine" "matchingnet" "relationnet")
 
 echo "=========================================="
 echo "Training 5-shot models"

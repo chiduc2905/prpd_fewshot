@@ -10,7 +10,7 @@ class RelationBlock(nn.Module):
     
     From: Sung et al. "Learning to Compare: Relation Network for Few-Shot Learning" (CVPR 2018)
     
-    Takes concatenated feature pairs and outputs relation logits.
+    Takes concatenated feature pairs and outputs relation scores in [0,1].
     """
     
     def __init__(self, input_size=128, hidden_size=8):
@@ -46,11 +46,11 @@ class RelationBlock(nn.Module):
         Args:
             x: (B, input_size, H, W) concatenated feature pairs
         Returns:
-            scores: (B, 1) relation logits (for compatibility with CELoss)
+            scores: (B, 1) relation scores in [0,1] (with sigmoid, paper-compliant)
         """
         out = self.layer1(x)
         out = self.layer2(out)
         out = out.view(out.size(0), -1)  # Flatten
         out = F.relu(self.fc1(out))
-        out = self.fc2(out)  # Logits (no sigmoid)
+        out = torch.sigmoid(self.fc2(out))  # Sigmoid for [0,1] scores
         return out
