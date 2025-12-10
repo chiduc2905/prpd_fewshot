@@ -8,7 +8,8 @@ def get_args():
     return parser.parse_args()
 
 # Configuration
-models = ['covamnet', 'protonet', 'cosine', 'matchingnet', 'relationnet']
+# matchingnet_resnet12 is a special case: matchingnet with resnet12 backbone
+models = ['covamnet', 'protonet', 'cosine', 'matchingnet', 'matchingnet_resnet12', 'relationnet']
 shots = [1, 5]
 samples_list = [12, 60, None]  # None means all samples
 lambda_center = 0
@@ -34,13 +35,24 @@ for model in models:
             current_experiment += 1
             print(f"\n[{current_experiment}/{total_experiments}] Running: Model={model}, Shot={shot}, Samples={samples if samples else 'All'}")
             
+            # Handle matchingnet_resnet12 special case
+            if model == 'matchingnet_resnet12':
+                actual_model = 'matchingnet'
+                backbone = 'resnet12'
+            else:
+                actual_model = model
+                backbone = None
+            
             cmd = [sys.executable, 'main.py', 
-                   '--model', model, 
+                   '--model', actual_model, 
                    '--shot_num', str(shot), 
                    '--loss', 'contrastive',  # Default, auto-overridden for relationnet
                    '--lambda_center', str(lambda_center),
                    '--mode', 'train',
                    '--project', args.project]
+            
+            if backbone is not None:
+                cmd.extend(['--backbone', backbone])
             
             if samples is not None:
                 cmd.extend(['--training_samples', str(samples)])
@@ -53,3 +65,4 @@ for model in models:
                 continue
 
 print("\nAll experiments completed.")
+

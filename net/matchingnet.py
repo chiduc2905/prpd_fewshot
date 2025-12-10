@@ -164,4 +164,9 @@ class MatchingNet(nn.Module):
         
         scores = torch.cat(scores_list, dim=0)  # (B*NQ, Way)
         
+        # Convert probabilities to logits for CrossEntropy loss
+        # CrossEntropy expects logits, not probabilities
+        # log(probs) converts probs to log-probs which work like logits
+        scores = torch.log(scores + 1e-8)  # Add epsilon to avoid log(0)
+        
         return scores
