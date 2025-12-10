@@ -70,19 +70,29 @@ class MatchingNet(nn.Module):
     This implementation follows the paper exactly.
     """
     
-    def __init__(self, init_type='kaiming', device='cuda'):
+    def __init__(self, backbone='conv64f', init_type='kaiming', device='cuda'):
         """
         Args:
+            backbone: 'conv64f' (paper default, 1024 dim) or 'resnet12' (512 dim)
             init_type: Weight initialization type
             device: Device to use
         """
         super(MatchingNet, self).__init__()
         
-        self.encoder = MatchingNetEncoder()
+        # Select backbone and determine feature dimension
+        if backbone == 'resnet12':
+            from net.encoders.resnet12_encoder import ResNet12Encoder
+            self.encoder = ResNet12Encoder()
+            feat_dim = 512
+        else:  # conv64f - paper default
+            self.encoder = MatchingNetEncoder()
+            feat_dim = 1024
         
-        # Full contextual embeddings (paper-compliant)
-        self.support_lstm = nn.LSTM(1024, 1024 // 2, batch_first=True, bidirectional=True)
-        self.query_attention_lstm = AttentionLSTM(input_size=1024, hidden_size=1024)
+        self.feat_dim = feat_dim
+        
+        # Full contextual embeddings (dynamic dimensions based on backbone)
+        self.support_lstm = nn.LSTM(feat_dim, feat_dim // 2, batch_first=True, bidirectional=True)
+        self.query_attention_lstm = AttentionLSTM(input_size=feat_dim, hidden_size=feat_dim)
         
         init_weights(self, init_type=init_type)
         self.to(device)

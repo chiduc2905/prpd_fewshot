@@ -1,0 +1,54 @@
+\documentclass{article}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+
+\begin{document}
+
+\begin{table*}[t]
+\centering
+\caption{Performance comparison of few-shot learning methods}
+\label{tab:results}
+\small
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\multicolumn{7}{c}{\textbf{(a) 12 training samples}} \\
+\midrule
+Method & \multicolumn{2}{c}{Accuracy$\uparrow$} & \multicolumn{2}{c}{Recall$\uparrow$} & \multicolumn{2}{c}{F1$\uparrow$} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+ & 1-shot & 5-shot & 1-shot & 5-shot & 1-shot & 5-shot \\
+\midrule
+CovaM-Net & 76.67 & 74.00 & 76.67 & 74.00 & 76.43 & 73.77 \\
+ProtoNet & 69.00 & 82.00 & 69.00 & 82.00 & 68.67 & 81.95 \\
+Cosine & 83.67 & 85.33 & 83.67 & 85.33 & 83.60 & 85.33 \\
+MatchingNet & 78.67 & 85.33 & 78.67 & 85.33 & 78.67 & 85.33 \\
+RelationNet & 69.33 & 70.67 & 69.33 & 70.67 & 69.32 & 69.96 \\
+\midrule
+\multicolumn{7}{c}{\textbf{(b) 60 training samples}} \\
+\midrule
+Method & \multicolumn{2}{c}{Accuracy$\uparrow$} & \multicolumn{2}{c}{Recall$\uparrow$} & \multicolumn{2}{c}{F1$\uparrow$} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+ & 1-shot & 5-shot & 1-shot & 5-shot & 1-shot & 5-shot \\
+\midrule
+CovaM-Net & 88.00 & 93.67 & 88.00 & 93.67 & 88.00 & 93.67 \\
+ProtoNet & 76.33 & 90.33 & 76.33 & 90.33 & 76.33 & 90.33 \\
+Cosine & 95.33 & 93.00 & 95.33 & 93.00 & 95.33 & 93.00 \\
+MatchingNet & 97.33 & 97.67 & 97.33 & 97.67 & 97.33 & 97.67 \\
+RelationNet & 83.67 & 94.00 & 83.67 & 94.00 & 83.57 & 93.98 \\
+\midrule
+\multicolumn{7}{c}{\textbf{(c) All training samples}} \\
+\midrule
+Method & \multicolumn{2}{c}{Accuracy$\uparrow$} & \multicolumn{2}{c}{Recall$\uparrow$} & \multicolumn{2}{c}{F1$\uparrow$} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+ & 1-shot & 5-shot & 1-shot & 5-shot & 1-shot & 5-shot \\
+\midrule
+CovaM-Net & 81.33 & 93.67 & 81.33 & 93.67 & 81.31 & 93.64 \\
+ProtoNet & 78.67 & 89.33 & 78.67 & 89.33 & 78.65 & 89.33 \\
+Cosine & \textbf{98.67} & 98.67 & \textbf{98.67} & 98.67 & \textbf{98.67} & 98.67 \\
+MatchingNet & 96.67 & \textbf{99.33} & 96.67 & \textbf{99.33} & 96.66 & \textbf{99.33} \\
+RelationNet & 87.33 & 96.67 & 87.33 & 96.67 & 87.31 & 96.66 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\end{document}

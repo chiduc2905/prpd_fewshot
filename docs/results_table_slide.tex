@@ -1,0 +1,78 @@
+\documentclass[landscape]{article}
+\usepackage[margin=1cm, a4paper]{geometry}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{tabularx}
+\usepackage{array}
+
+\begin{document}
+
+\definecolor{headerblue}{RGB}{31, 78, 120}
+\definecolor{lightgray}{RGB}{240, 240, 240}
+
+\pagestyle{empty}
+
+\newcolumntype{C}{>{\centering\arraybackslash}X}
+
+\begin{table}[p]
+\large
+\renewcommand{\arraystretch}{1.4}
+\noindent
+\begin{tabularx}{\textwidth}{@{}lCCCCCC@{}}
+\toprule
+\rowcolor{headerblue}
+\multicolumn{7}{c}{\color{white}\textbf{\LARGE (a) 12 Training Samples}} \\
+\midrule
+\rowcolor{lightgray}
+\textbf{Method} & \multicolumn{2}{c}{\textbf{Accuracy↑}} & \multicolumn{2}{c}{\textbf{Recall↑}} & \multicolumn{2}{c}{\textbf{F1↑}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+\rowcolor{lightgray}
+ & \textbf{1-shot} & \textbf{5-shot} & \textbf{1-shot} & \textbf{5-shot} & \textbf{1-shot} & \textbf{5-shot} \\
+\midrule
+CovaM-Net & 76.67 & 74.00 & 76.67 & 74.00 & 76.43 & 73.77 \\
+\rowcolor{lightgray}
+ProtoNet & 69.00 & 82.00 & 69.00 & 82.00 & 68.67 & 81.95 \\
+Cosine & 83.67 & 85.33 & 83.67 & 85.33 & 83.60 & 85.33 \\
+\rowcolor{lightgray}
+MatchingNet & 78.67 & 85.33 & 78.67 & 85.33 & 78.67 & 85.33 \\
+RelationNet & 69.33 & 70.67 & 69.33 & 70.67 & 69.32 & 69.96 \\
+\midrule[1.5pt]
+\rowcolor{headerblue}
+\multicolumn{7}{c}{\color{white}\textbf{\LARGE (b) 60 Training Samples}} \\
+\midrule
+\rowcolor{lightgray}
+\textbf{Method} & \multicolumn{2}{c}{\textbf{Accuracy↑}} & \multicolumn{2}{c}{\textbf{Recall↑}} & \multicolumn{2}{c}{\textbf{F1↑}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+\rowcolor{lightgray}
+ & \textbf{1-shot} & \textbf{5-shot} & \textbf{1-shot} & \textbf{5-shot} & \textbf{1-shot} & \textbf{5-shot} \\
+\midrule
+CovaM-Net & 88.00 & 93.67 & 88.00 & 93.67 & 88.00 & 93.67 \\
+\rowcolor{lightgray}
+ProtoNet & 76.33 & 90.33 & 76.33 & 90.33 & 76.33 & 90.33 \\
+Cosine & 95.33 & 93.00 & 95.33 & 93.00 & 95.33 & 93.00 \\
+\rowcolor{lightgray}
+MatchingNet & 97.33 & 97.67 & 97.33 & 97.67 & 97.33 & 97.67 \\
+RelationNet & 83.67 & 94.00 & 83.67 & 94.00 & 83.57 & 93.98 \\
+\midrule[1.5pt]
+\rowcolor{headerblue}
+\multicolumn{7}{c}{\color{white}\textbf{\LARGE (c) All Training Samples}} \\
+\midrule
+\rowcolor{lightgray}
+\textbf{Method} & \multicolumn{2}{c}{\textbf{Accuracy↑}} & \multicolumn{2}{c}{\textbf{Recall↑}} & \multicolumn{2}{c}{\textbf{F1↑}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+\rowcolor{lightgray}
+ & \textbf{1-shot} & \textbf{5-shot} & \textbf{1-shot} & \textbf{5-shot} & \textbf{1-shot} & \textbf{5-shot} \\
+\midrule
+CovaM-Net & 81.33 & 93.67 & 81.33 & 93.67 & 81.31 & 93.64 \\
+\rowcolor{lightgray}
+ProtoNet & 78.67 & 89.33 & 78.67 & 89.33 & 78.65 & 89.33 \\
+Cosine & \textbf{98.67} & 98.67 & \textbf{98.67} & 98.67 & \textbf{98.67} & 98.67 \\
+\rowcolor{lightgray}
+MatchingNet & 96.67 & \textbf{99.33} & 96.67 & \textbf{99.33} & 96.66 & \textbf{99.33} \\
+RelationNet & 87.33 & 96.67 & 87.33 & 96.67 & 87.31 & 96.66 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\end{document}

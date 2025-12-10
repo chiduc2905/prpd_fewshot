@@ -41,6 +41,9 @@ def get_args():
                         choices=['cosine', 'protonet', 'covamnet', 'matchingnet', 'relationnet'])
     parser.add_argument('--use_base_encoder', action='store_true',
                         help='Use Conv64F_Encoder (GroupNorm) for ProtoNet instead of paper-specific encoder')
+    parser.add_argument('--backbone', type=str, default='conv64f',
+                        choices=['conv64f', 'resnet12'],
+                        help='Backbone for MatchingNet: conv64f (paper, 1024 dim) or resnet12 (512 dim)')
 
     
     # Few-shot settings
@@ -97,8 +100,8 @@ def get_model(args):
     elif args.model == 'covamnet':
         model = CovaMNet(device=device)
     elif args.model == 'matchingnet':
-        # MatchingNet: paper-specific encoder only (LSTM dimensions hardcoded)
-        model = MatchingNet(device=device)
+        # MatchingNet: supports conv64f (paper) or resnet12 backbone
+        model = MatchingNet(backbone=args.backbone, device=device)
     elif args.model == 'relationnet':
         # RelationNet: paper-specific encoder only (RelationBlock expects 4x4 features)
         model = RelationNet(device=device)
@@ -424,7 +427,10 @@ def main():
     elif args.model == 'covamnet' or args.model == 'cosine':
         encoder_info = "Conv64F_Encoder (GroupNorm)"
     elif args.model == 'matchingnet':
-        encoder_info = "MatchingNetEncoder (BatchNorm, paper-only)"
+        if args.backbone == 'resnet12':
+            encoder_info = "ResNet12Encoder (BatchNorm, 512 dim) [--backbone resnet12]"
+        else:
+            encoder_info = "MatchingNetEncoder (BatchNorm, 1024 dim) [default]"
     elif args.model == 'relationnet':
         encoder_info = "RelationNetEncoder (BatchNorm, paper-only)"
     else:
